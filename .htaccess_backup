@@ -1,0 +1,38 @@
+RewriteEngine On
+RewriteBase /
+
+# 1. CORS Headers (Mobile App connectivity ke liye)
+Header set Access-Control-Allow-Origin "*"
+Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, DELETE"
+Header set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, User-ID"
+
+# 2. Handle OPTIONS request (Preflight request fix)
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]
+
+# 3. LITESPEED & SERVER OPTIMIZATION
+<IfModule Litespeed>
+    RewriteRule .* - [E=noabort:1]
+    RewriteRule .* - [E=nothrottle:1]
+</IfModule>
+
+# 4. PHP UPLOAD & MEMORY LIMITS
+<IfModule mod_php.c>
+    php_value upload_max_filesize 1024M
+    php_value post_max_size 1024M
+    php_value max_execution_time 600
+    php_value max_input_time 600
+    php_value memory_limit 1024M
+</IfModule>
+
+# ====================================================
+# 🔒 5. SECURITY: BLOCK SENSITIVE FOLDERS
+# Koi bhi agar uploads/kyc folder kholne ki koshish karega to 403 Forbidden milega
+# ====================================================
+RewriteRule ^uploads/kyc/ - [F,L]
+
+
+# 6. Routing (CI4 Standard with Query String Fix)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?/$1 [L]

@@ -1,0 +1,6 @@
+/public/uploads/*
+/public/assets/videos/*
+/writable/*
+!/writable/index.html
+/vendor/
+.env

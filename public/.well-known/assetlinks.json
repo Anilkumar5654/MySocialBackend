@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.socialhub.app",
+      "sha256_cert_fingerprints": [
+        "BB:92:1A:E3:68:FD:95:53:55:D2:71:06:0C:1A:23:83:A7:46:93:B8:B6:0C:DC:9F:47:80:F8:43:AB:1D:33:E5"
+      ]
+    }
+  }
+]
+
