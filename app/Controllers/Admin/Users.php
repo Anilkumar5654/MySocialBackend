@@ -61,9 +61,9 @@ class Users extends BaseController
     {
         if (!has_permission('users.view')) return redirect()->back();
         
-        // ✨ UPGRADE: Detailed User view with Channel info (Including Channel Unique ID)
+        // ✨ UPGRADE: Sync with Channels Table (Monetization Status & Enabled Key)
         $user = $this->db->table('users u')
-            ->select('u.*, c.id as channel_id, c.unique_id as channel_unique_id, c.trust_score, c.handle, c.name as channel_name, c.monetization_status as channel_monetization, c.strikes_count')
+            ->select('u.*, c.id as channel_id, c.unique_id as channel_unique_id, c.trust_score, c.handle, c.name as channel_name, c.monetization_status as channel_monetization, c.is_monetization_enabled, c.strikes_count')
             ->join('channels c', 'c.user_id = u.id', 'left')
             ->where('u.id', $id)
             ->get()->getRow();
@@ -72,9 +72,64 @@ class Users extends BaseController
 
         // ✨ UPGRADE: Fetching additional data for the View Screen
         $data['user']         = $user;
-        $data['transactions'] = $this->db->table('wallet_transactions')->where('user_id', $id)->orderBy('id', 'DESC')->limit(10)->get()->getResult();
+        
+        // --- FINANCIAL LOGS FILTER UPGRADE ---
+        $txnStart = $this->request->getGet('txn_start');
+        $txnEnd   = $this->request->getGet('txn_end');
+        $txnBuilder = $this->db->table('wallet_transactions')->where('user_id', $id);
+        
+        if ($txnStart && $txnEnd) {
+            $txnBuilder->where("created_at BETWEEN '$txnStart 00:00:00' AND '$txnEnd 23:59:59'");
+        } else {
+            $txnBuilder->limit(10);
+        }
+        
+        $data['transactions'] = $txnBuilder->orderBy('id', 'DESC')->get()->getResult();
+        // --------------------------------------
+
         $data['strikes']      = $this->db->table('channel_strikes')->where('channel_id', $user->channel_id)->orderBy('id', 'DESC')->get()->getResult();
-        $data['kyc_data']     = $this->db->table('user_kyc_details')->where('user_id', $id)->get()->getRow();
+        
+        // ✨ SYNC: Fetching full KYC details for the profile view screen
+        $data['kyc_data']     = $this->db->table('user_kyc_details')
+            ->where('user_id', $id)
+            ->orderBy('id', 'DESC')
+            ->get()->getRow();
+
+        // ✨ UPGRADE: Fetching Active Sessions & Security Logs from auth_tokens
+        $data['sessions']     = $this->db->table('auth_tokens')
+            ->where('user_id', $id)
+            ->orderBy('created_at', 'DESC')
+            ->limit(10)
+            ->get()->getResult();
+
+        // ✨ UPGRADE: Revenue Dashboard Logic (Sync with View Section)
+        $startDate = $this->request->getGet('start_date') ?: date('Y-m-d', strtotime('-30 days'));
+        $endDate   = $this->request->getGet('end_date') ?: date('Y-m-d');
+
+        $earnings = $this->db->table('creator_earnings')
+            ->where('user_id', $id)
+            ->whereIn('status', ['approved', 'paid'])
+            ->where("created_at BETWEEN '$startDate 00:00:00' AND '$endDate 23:59:59'")
+            ->selectSum('amount')->get()->getRow()->amount ?? 0;
+
+        $payouts = $this->db->table('withdrawals')
+            ->where(['user_id' => $id, 'status' => 'completed'])
+            ->selectSum('amount')->get()->getRow()->amount ?? 0;
+
+        $pending = $this->db->table('creator_earnings')
+            ->where(['user_id' => $id, 'status' => 'pending'])
+            ->selectSum('amount')->get()->getRow()->amount ?? 0;
+
+        $cWallet = $this->db->table('creator_wallets')->where('user_id', $id)->get()->getRow();
+        $sWallet = $this->db->table('spending_wallets')->where('user_id', $id)->get()->getRow();
+
+        $data['finance_stats'] = [
+            'total_earnings'  => $earnings,
+            'total_payouts'   => $payouts,
+            'pending_amount'  => $pending,
+            'creator_balance' => $cWallet->balance ?? 0,
+            'spending_balance'=> $sWallet->balance ?? 0
+        ];
         
         $data['title'] = "User Profile: " . ($user->name ?: $user->username);
         
@@ -93,10 +148,13 @@ class Users extends BaseController
         $user = $this->db->table('users')->where('id', $id)->get()->getRow();
         if (!$user) return redirect()->to('admin/users')->with('error', 'User not found.');
 
+        // Fetching Roles for the permissions section
+        $roles = $this->db->table('admin_roles')->get()->getResult();
+
         $data = [
             'user'  => $user,
-            'roles' => $this->db->table('admin_roles')->get()->getResult(),
-            'title' => "Edit User: " . $user->username
+            'roles' => $roles,
+            'title' => "Edit User Profile: @" . $user->username
         ];
 
         return view('admin/users/edit', $data);
@@ -105,29 +163,40 @@ class Users extends BaseController
     public function update($id)
     {
         if (!has_permission('users.edit')) return redirect()->back();
-        if ($id == 1 && session()->get('id') != 1) return redirect()->back();
+        
+        // Security Guard: Prevents editing ID 1 by anyone else
+        if ($id == 1 && session()->get('id') != 1) {
+            return redirect()->back()->with('error', 'Unauthorized Access.');
+        }
 
-        // ✨ SYNC FIX: Unique ID removed from postData because it must remain constant
+        // Fetch current data to check for changes
+        $currentUser = $this->db->table('users')->where('id', $id)->get()->getRow();
+        if (!$currentUser) return redirect()->back()->with('error', 'User not found.');
+
+        // ✨ CATEGORY A: Identity & Profile
         $postData = [
-            'name'                 => esc($this->request->getPost('name')),
-            'username'             => esc($this->request->getPost('username')),
-            'email'                => esc($this->request->getPost('email')),
-            'email_verified'       => $this->request->getPost('email_verified') ? 1 : 0,
-            'phone'                => esc($this->request->getPost('phone')),
-            'location'             => esc($this->request->getPost('location')),
-            'website'              => esc($this->request->getPost('website')),
-            'bio'                  => esc($this->request->getPost('bio')),
-            'is_verified'          => $this->request->getPost('is_verified') ? 1 : 0,
-            'is_banned'            => $this->request->getPost('is_banned') ? 1 : 0,
-            'is_creator'           => $this->request->getPost('is_creator') ? 1 : 0,
-            'is_private'           => $this->request->getPost('is_private') ? 1 : 0,
-            'is_payout_setup'      => $this->request->getPost('is_payout_setup') ? 1 : 0,
-            'allow_comments'       => $this->request->getPost('allow_comments'),
-            'allow_video_uploads'  => $this->request->getPost('allow_video_uploads') ? 1 : 0,
-            'preferred_currency'   => $this->request->getPost('preferred_currency') ?: 'INR',
-            'kyc_status'           => $this->request->getPost('kyc_status') ?: 'NOT_SUBMITTED',
+            'name'                => esc($this->request->getPost('name')),
+            'username'            => esc($this->request->getPost('username')),
+            'email'               => esc($this->request->getPost('email')),
+            'phone'               => esc($this->request->getPost('phone')),
+            'dob'                 => $this->request->getPost('dob') ?: NULL,
+            'gender'              => $this->request->getPost('gender'),
+            'bio'                 => esc($this->request->getPost('bio')),
+            'website'             => esc($this->request->getPost('website')),
+            'location'            => esc($this->request->getPost('location')),
+            'district'            => esc($this->request->getPost('district')),
+            'state'               => esc($this->request->getPost('state')),
+            'country'             => esc($this->request->getPost('country')),
         ];
 
+        // ✨ CATEGORY B: Account Status & Verification
+        $postData['email_verified']  = $this->request->getPost('email_verified') ? 1 : 0;
+        $postData['is_verified']     = $this->request->getPost('is_verified') ? 1 : 0;
+        $postData['is_banned']       = $this->request->getPost('is_banned') ? 1 : 0;
+        $postData['kyc_status']      = $this->request->getPost('kyc_status');
+
+        // ✨ CATEGORY C: Permissions & Admin Roles
+        // Loop hole check: Admin cannot change their own role unless they are super admin
         if (has_permission('staff.manage') && ($id != session()->get('id'))) {
             $roleId = $this->request->getPost('role_id');
             if ($roleId !== null) {
@@ -136,14 +205,81 @@ class Users extends BaseController
             }
         }
 
-        $password = $this->request->getPost('password');
-        if (!empty($password)) $postData['password'] = password_hash($password, PASSWORD_DEFAULT);
+        $postData['is_creator']      = $this->request->getPost('is_creator') ? 1 : 0;
+        $postData['is_private']      = $this->request->getPost('is_private') ? 1 : 0;
+        $postData['is_payout_setup'] = $this->request->getPost('is_payout_setup') ? 1 : 0;
 
-        if ($this->db->table('users')->where('id', $id)->update($postData)) {
-            log_action('UPDATE_USER', $id, 'users', "Profile updated for @" . $postData['username']);
+        // ✨ CATEGORY E: App Settings & Toggles
+        $postData['allow_comments']      = $this->request->getPost('allow_comments');
+        $postData['allow_video_uploads'] = $this->request->getPost('allow_video_uploads') ? 1 : 0;
+        $postData['allow_dm_requests']   = $this->request->getPost('allow_dm_requests') ? 1 : 0;
+        $postData['preferred_currency']  = $this->request->getPost('preferred_currency') ?: 'INR';
+
+        // Password Security: Only update if not empty
+        $password = $this->request->getPost('password');
+        if (!empty($password)) {
+            $postData['password'] = password_hash($password, PASSWORD_DEFAULT);
         }
 
-        return redirect()->to('admin/users')->with('success', 'User profile updated.');
+        // Validate Unique Constraints before Update
+        $existing = $this->db->table('users')
+            ->where('id !=', $id)
+            ->groupStart()
+                ->where('username', $postData['username'])
+                ->orWhere('email', $postData['email'])
+            ->groupEnd()
+            ->get()->getRow();
+
+        if ($existing) {
+            return redirect()->back()->withInput()->with('error', 'Username or Email already taken by another user.');
+        }
+
+        if ($this->db->table('users')->where('id', $id)->update($postData)) {
+            log_action('UPDATE_USER_PROFILE', $id, 'users', "Detailed profile update for @" . $postData['username']);
+            return redirect()->to('admin/users/view/' . $id)->with('success', 'User profile has been updated successfully.');
+        }
+
+        return redirect()->back()->with('error', 'Failed to update user.');
+    }
+
+    /**
+     * ✨ SECURITY UPGRADE: Force Logout All Sessions
+     */
+    public function force_logout_all($id) {
+        if (!has_permission('users.edit')) return redirect()->back();
+        $this->db->table('auth_tokens')->where('user_id', $id)->update(['is_active' => 0, 'logged_out_at' => date('Y-m-d H:i:s')]);
+        log_action('FORCE_LOGOUT', $id, 'users', "All sessions terminated by Admin.");
+        return redirect()->back()->with('success', 'All active sessions terminated.');
+    }
+
+    /**
+     * ✨ SECURITY UPGRADE: Trigger Password Reset Email
+     */
+    public function reset_password_trigger($id) {
+        if (!has_permission('users.edit')) return redirect()->back();
+        // Trigger logic: reset_token generate and log it
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $this->db->table('users')->where('id', $id)->update([
+            'reset_token' => $otp,
+            'reset_token_expiry' => date('Y-m-d H:i:s', strtotime('+1 hour'))
+        ]);
+        log_action('RESET_PWD_TRIGGER', $id, 'users', "Manual password reset OTP generated by Admin.");
+        return redirect()->back()->with('success', "Password reset OTP ($otp) has been generated for the user.");
+    }
+
+    /**
+     * ✨ SECURITY UPGRADE: Toggle 2FA Status
+     */
+    public function toggle_2fa($id) {
+        if (!has_permission('users.edit')) return redirect()->back();
+        $user = $this->db->table('users')->where('id', $id)->get()->getRow();
+        if ($user->two_factor_secret) {
+            $this->db->table('users')->where('id', $id)->update(['two_factor_secret' => NULL]);
+            log_action('2FA_DISABLE', $id, 'users', "2FA disabled by Admin.");
+            return redirect()->back()->with('success', 'Two-Factor Authentication has been DISABLED.');
+        } else {
+            return redirect()->back()->with('error', 'User has not enabled 2FA. Admin cannot enable it manually.');
+        }
     }
 
     public function toggle_ban($id)

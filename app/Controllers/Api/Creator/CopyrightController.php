@@ -27,42 +27,7 @@ class CopyrightController extends BaseController
     }
 
     // ==========================================
-    // 🚀 1. AUTO-MATCHING ENGINE (SCANNER)
-    // ==========================================
-    public function scan()
-    {
-        $newVideos = $this->db->table('videos')
-                        ->where('original_content_id', NULL)
-                        ->where('frame_hashes !=', NULL)
-                        ->get()->getResultArray();
-
-        $scanCount = 0;
-        foreach ($newVideos as $target) {
-            $targetHashes = explode(',', $target['frame_hashes']);
-            
-            $originals = $this->db->table('videos')
-                            ->where('id !=', $target['id'])
-                            ->where('frame_hashes !=', NULL)
-                            ->get()->getResultArray();
-
-            foreach ($originals as $original) {
-                $originalHashes = explode(',', $original['frame_hashes']);
-                $common = array_intersect($targetHashes, $originalHashes);
-                
-                if (count($common) >= 7) { 
-                    $this->db->table('videos')->where('id', $target['id'])->update([
-                        'original_content_id' => $original['id']
-                    ]);
-                    $scanCount++;
-                    break; 
-                }
-            }
-        }
-        return $this->respond(['status' => 'success', 'matches_found' => $scanCount]);
-    }
-
-    // ==========================================
-    // 📱 2. MAIN LIST: ORIGINAL VIDEOS
+    // 📱 1. MAIN LIST: ORIGINAL VIDEOS
     // ==========================================
     public function getOriginalVideos()
     {
@@ -71,6 +36,7 @@ class CopyrightController extends BaseController
 
         $builder = $this->db->table('videos v');
         $builder->select('v.id, v.title, v.thumbnail_url as thumbnail, v.created_at as upload_date, v.views_count as views, v.duration');
+        // Matches count logic stays here as it's UI dependent
         $builder->select("(SELECT COUNT(DISTINCT id) FROM videos WHERE original_content_id = v.id AND channel_id != v.channel_id) as matches");
         
         $builder->where('v.user_id', $userId);
@@ -86,13 +52,12 @@ class CopyrightController extends BaseController
     }
 
     // ==========================================
-    // 🔍 3. MATCH DETAILS (SMART REVENUE LOGIC)
+    // 🔍 2. MATCH DETAILS (SMART REVENUE LOGIC)
     // ==========================================
     public function getMatchedClips($id = null)
     {
         if (!$id) return $this->fail('Video ID is required');
 
-        // 🔥 Fetch dynamic revenue share from ad_settings table
         $revShare = $this->getAdSetting('revenue_share_original_creator', 70);
 
         $original = $this->db->table('videos')
@@ -114,7 +79,8 @@ class CopyrightController extends BaseController
         $builder->select('s.type as s_type, s.status as s_status'); 
         
         $builder->join('channels c', 'c.id = v.channel_id');
-        $builder->join('channel_strikes s', "s.content_id = v.id AND s.status != 'REJECTED'", 'left');
+        // 🔥 FIX 1: Removed "!= REJECTED" and explicitly set content_type to properly show full status lifecycle
+        $builder->join('channel_strikes s', "s.content_id = v.id AND s.content_type = 'VIDEO'", 'left');
         
         $builder->where('v.original_content_id', $id);
         $builder->groupBy('v.id'); 
@@ -126,7 +92,6 @@ class CopyrightController extends BaseController
             $m['thumb'] = get_media_url($m['thumb']);
             $m['upload_date'] = date('d M, Y', strtotime($m['upload_date']));
             
-            // Frame Hash Comparison
             if (!empty($origHashes) && !empty($m['frame_hashes'])) {
                 $matchHashes = explode(',', $m['frame_hashes']);
                 $common = array_intersect($origHashes, $matchHashes);
@@ -135,21 +100,26 @@ class CopyrightController extends BaseController
                 $m['match_percentage'] = 0; 
             }
 
-            // Status Mode Logic
             $mode = 'NONE';
-            if ($m['s_status'] === 'ACTIVE' || $m['s_status'] === 'PENDING') {
-                if ($m['s_type'] === 'PENDING_REVIEW') $mode = 'PENDING';
-                elseif ($m['s_type'] === 'STRIKE') $mode = 'REMOVED';
-                elseif ($m['s_type'] === 'CLAIM') $mode = 'CLAIMED';
-            } elseif ($m['s_status'] === 'REJECTED') {
-                $mode = 'REJECTED';
+            
+            // 🔥 FIX 2: Full Lifecycle Handling (Restored & Rejected)
+            if ($m['s_status']) {
+                if ($m['s_status'] === 'APPEAL_APPROVED') {
+                    $mode = 'RESTORED';
+                } elseif ($m['s_status'] === 'REJECTED') {
+                    $mode = 'REJECTED';
+                } elseif ($m['s_status'] === 'EXPIRED') {
+                    $mode = 'RESTORED';
+                } elseif ($m['s_status'] === 'ACTIVE' || $m['s_status'] === 'PENDING') {
+                    if ($m['s_type'] === 'PENDING_REVIEW') $mode = 'PENDING';
+                    elseif ($m['s_type'] === 'STRIKE') $mode = 'REMOVED';
+                    elseif ($m['s_type'] === 'CLAIM') $mode = 'CLAIMED';
+                }
             } elseif ($m['phys_stat'] === 'STRIKED') {
                 $mode = 'REMOVED';
             }
 
             $m['current_mode'] = $mode;
-            
-            // 🔥 Dynamic Key: Bhej rahe hain kitna share creator ko milega
             $m['rev_share_percent'] = $revShare;
 
             unset($m['frame_hashes'], $m['phys_stat'], $m['s_type'], $m['s_status']); 
@@ -159,7 +129,7 @@ class CopyrightController extends BaseController
     }
 
     // ==========================================
-    // ⚖️ 4. TAKE ACTION
+    // ⚖️ 3. TAKE ACTION (Bulletproof Version)
     // ==========================================
     public function takeAction()
     {
@@ -168,24 +138,50 @@ class CopyrightController extends BaseController
 
         if (!isset($json->matchedId)) return $this->fail('Invalid Request');
 
+        $contentType = strtoupper($json->contentType ?? 'VIDEO');
+        $targetTable = ($contentType === 'REEL') ? 'reels' : 'videos';
+
         $reporterChannel = $this->db->table('channels')->where('user_id', $userId)->get()->getRow();
-        $offenderVideo = $this->db->table('videos')->where('id', $json->matchedId)->get()->getRow();
+        $offenderContent = $this->db->table($targetTable)->where('id', $json->matchedId)->get()->getRow();
+
+        if (!$offenderContent || !$reporterChannel) {
+            return $this->fail('Content or Channel not found');
+        }
+
+        // 🔥 FIX 3: STRICT DUPLICATE CHECK (One action per content allowed)
+        $existingAction = $this->db->table('channel_strikes')
+            ->where('content_id', $json->matchedId)
+            ->where('content_type', $contentType)
+            ->countAllResults();
+
+        if ($existingAction > 0) {
+            return $this->fail('An action has already been taken or reviewed for this content. You cannot submit it again.');
+        }
+
+        // 🔥 FIX 4: BULLETPROOF ORIGINAL ID FALLBACK
+        $originalId = $json->originalId ?? $offenderContent->original_content_id ?? null;
+
+        if (!$originalId) {
+            return $this->fail('Original Video ID is missing. Cannot process action.');
+        }
 
         $data = [
-            'channel_id'          => $offenderVideo->channel_id,
+            'channel_id'          => $offenderContent->channel_id,
             'reporter_channel_id' => $reporterChannel->id,
             'report_source'       => 'USER',
-            'content_type'        => 'VIDEO',
+            'content_type'        => $contentType,
             'content_id'          => $json->matchedId,
-            'original_content_id' => $json->originalId,
+            'original_content_id' => $originalId,
             'reason'              => 'Copyright Match Found via Creator Studio',
             'type'                => ($json->actionType === 'STRIKE') ? 'PENDING_REVIEW' : 'CLAIM',
-            'status'              => 'ACTIVE',
-            'created_at'          => date('Y-m-d H:i:s')
+            'status'              => 'ACTIVE'
+            // 'created_at' removed so DB handles it naturally
         ];
 
         if ($this->db->table('channel_strikes')->insert($data)) {
-            return $this->respond(['status' => 'success', 'message' => 'Action Submitted']);
+            return $this->respond(['status' => 'success', 'message' => 'Action Submitted Successfully. It is now pending review.']);
         }
+
+        return $this->fail('Failed to process request');
     }
 }

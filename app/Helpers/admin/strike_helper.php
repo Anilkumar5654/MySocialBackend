@@ -17,101 +17,102 @@ if (!function_exists('get_strike_setting_value')) {
 }
 
 /**
- * 2. EXECUTE LOGIC (Issue Strike / Claim / Warning)
- * Optimized: No logs for Claim/Warning. Strict penalty for Strikes.
+ * 2. EXECUTE LOGIC (ULTIMATE DEBUG VERSION)
  */
 if (!function_exists('execute_strike_logic')) {
     function execute_strike_logic($data, $existingRequestId = null) {
         $db = Database::connect();
-        $type = strtoupper($data['type']); // STRIKE, WARNING, CLAIM
         
-        // Severity Points Calculation
-        if ($type === 'WARNING' || $type === 'CLAIM') {
-            $points = 0;
-        } else {
-            // Check dynamic settings for Video or Reel strikes
-            $penaltyKey = 'trust_penalty_' . strtolower($data['content_type'] ?? 'video') . '_strike';
-            $points = (int)get_strike_setting_value($penaltyKey, 10); 
+        $logFile = WRITEPATH . 'logs/copyright_debug.log';
+        $timestamp = date('Y-m-d H:i:s');
+        $debug = "\n--- 🚀 NEW STRIKE ATTEMPT [$timestamp] ---\n";
+        
+        $type = strtoupper($data['type']); 
+        $contentType = strtoupper($data['content_type'] ?? 'VIDEO'); 
+        $table = ($contentType === 'REEL') ? 'reels' : 'videos';
+
+        // 🔍 STEP 1: Content Exists?
+        $targetContent = $db->table($table)->where('id', $data['content_id'])->get()->getRow();
+        if (!$targetContent) {
+            $debug .= "❌ ERROR: ID {$data['content_id']} NOT FOUND in '$table'.\n";
+            file_put_contents($logFile, $debug, FILE_APPEND);
+            return ['status' => false, 'error' => 'Content missing'];
         }
-        
-        $expiryDays = (int)get_strike_setting_value('trust_strike_expiry_days', 90);
-        $expiresAt = ($type === 'STRIKE') ? date('Y-m-d H:i:s', strtotime("+$expiryDays days")) : null;
+
+        // 🔍 STEP 2: Channel Exists?
+        $targetChannel = $db->table('channels')->where('id', $data['channel_id'])->get()->getRow();
+        if (!$targetChannel) {
+            $debug .= "❌ ERROR: Channel ID {$data['channel_id']} NOT FOUND in channels.\n";
+            file_put_contents($logFile, $debug, FILE_APPEND);
+            return ['status' => false, 'error' => 'Channel missing'];
+        }
 
         $db->transStart();
 
-        // --- 1. Strike Record Update/Insert ---
-        $strikeData = [
-            'type'                => $type,
-            'status'              => 'ACTIVE',
-            'severity_points'     => $points,
-            'expires_at'          => $expiresAt,
-            'original_content_id' => $data['original_content_id'] ?? null,
-            'reason'              => $data['reason'] ?? 'Policy Violation',
-            'description'         => $data['description'] ?? 'Admin Action'
+        // Points Calculation
+        $penaltyKey = 'trust_penalty_' . strtolower($contentType) . '_strike';
+        $points = ($type === 'STRIKE') ? (int)get_strike_setting_value($penaltyKey, 10) : 0;
+        $expiryDays = (int)get_strike_setting_value('trust_strike_expiry_days', 90);
+        $expiresAt = ($type === 'STRIKE') ? date('Y-m-d H:i:s', strtotime("+$expiryDays days")) : null;
+
+        // --- ACTION 1: Update channel_strikes ---
+        $strikeUpdate = [
+            'type'            => $type,
+            'status'          => 'ACTIVE',
+            'severity_points' => $points,
+            'expires_at'      => $expiresAt,
+            'locked_by'       => null,
+            'locked_at'       => null
         ];
+        $db->table('channel_strikes')->where('id', $existingRequestId)->update($strikeUpdate);
 
-        if ($existingRequestId) {
-            $db->table('channel_strikes')->where('id', $existingRequestId)->update($strikeData);
-        } else {
-            $strikeData['channel_id']   = $data['channel_id'];
-            $strikeData['content_type'] = strtoupper($data['content_type'] ?? 'VIDEO');
-            $strikeData['content_id']   = $data['content_id'];
-            $strikeData['report_source']= 'MANUAL_ADMIN';
-            $strikeData['created_at']   = date('Y-m-d H:i:s');
-            $db->table('channel_strikes')->insert($strikeData);
-        }
+        if ($type === 'STRIKE') {
+            // --- ACTION 2: Update Media Table ---
+            $db->table($table)->where('id', $data['content_id'])->update([
+                'monetization_enabled' => 0, 
+                'copyright_status'     => 'STRIKED', 
+                'visibility'           => 'blocked'
+            ]);
 
-        // --- 2. Channel Stats Update ---
-        if ($points > 0 && $type === 'STRIKE') {
-            $db->query("UPDATE channels SET trust_score = GREATEST(0, trust_score - ?), strikes_count = strikes_count + 1 WHERE id = ?", [$points, $data['channel_id']]);
-        } 
-        elseif ($type === 'WARNING') {
-            $db->query("UPDATE channels SET warnings_count = warnings_count + 1 WHERE id = ?", [$data['channel_id']]);
-        }
+            // --- ACTION 3: Update Channel Stats (Fixed Binding) ---
+            $db->query("UPDATE channels SET trust_score = GREATEST(0, CAST(trust_score AS SIGNED) - ?), strikes_count = strikes_count + 1 WHERE id = ?", [(int)$points, $data['channel_id']]);
 
-        // --- 3. Content Lockdown ---
-        if (!empty($data['content_id'])) {
-            $table = (strtoupper($data['content_type'] ?? 'VIDEO') == 'VIDEO') ? 'videos' : 'reels';
-            if ($type === 'STRIKE') {
-                $db->table($table)->where('id', $data['content_id'])->update([
-                    'monetization_enabled' => 0, 
-                    'copyright_status'     => 'STRIKED', 
-                    'visibility'           => 'blocked'
-                ]);
-            } else {
-                $db->table($table)->where('id', $data['content_id'])->update([
-                    'copyright_status'    => ($type === 'CLAIM') ? 'CLAIMED' : 'NONE', 
-                    'original_content_id' => ($type === 'CLAIM') ? ($data['original_content_id'] ?? null) : null
-                ]);
-            }
-        }
-
-        // --- 4. History Log (Only for Strike) ---
-        if ($points > 0 && $type === 'STRIKE') {
-            $channel = $db->table('channels')->select('user_id')->where('id', $data['channel_id'])->get()->getRow();
-            if ($channel) {
+            // --- ACTION 4: Trust Log (Only if points > 0) ---
+            if ($points > 0) {
                 $db->table('trust_score_logs')->insert([
-                    'user_id'     => $channel->user_id,
+                    'user_id'     => $targetChannel->user_id,
                     'channel_id'  => $data['channel_id'],
-                    'points'      => -$points,
+                    'points'      => -(int)$points,
                     'action_type' => 'PENALTY',
-                    'reason'      => 'Strike: ' . ($data['reason'] ?? 'Copyright'),
-                    'created_at'  => date('Y-m-d H:i:s')
+                    'reason'      => 'Strike: ' . ($data['reason'] ?? 'Copyright Match')
+                    // 🔥 FIX: Yahan se 'created_at' hata diya gaya hai taaki MySQL error na de!
                 ]);
             }
+        } 
+        elseif ($type === 'CLAIM') {
+            $db->table($table)->where('id', $data['content_id'])->update([
+                'copyright_status'    => 'CLAIMED', 
+                'original_content_id' => $data['original_content_id'] ?? null
+            ]);
         }
 
         $db->transComplete();
-        return ['status' => $db->transStatus(), 'points' => $points];
+        $status = $db->transStatus();
+
+        if ($status === FALSE) {
+            $error = $db->error();
+            $debug .= "❌ TRANSACTION FAILED! " . $error['message'] . "\n";
+        } else {
+            $debug .= "🚀 SUCCESS: All updates committed.\n";
+        }
+
+        file_put_contents($logFile, $debug, FILE_APPEND);
+        return ['status' => $status, 'points' => $points];
     }
 }
 
 /**
- * 3. REVERT LOGIC (Smart Restoration)
- * $newStatus: EXPIRED (Cron) or APPEAL_APPROVED (Admin)
- * $restoreMedia: 
- * - true: Appeal approve hone par (Points + Video wapas)
- * - false: Strike purani hone par (Sirf Points wapas, Video blocked rahega)
+ * 3. REVERT LOGIC
  */
 if (!function_exists('revert_strike_logic')) {
     function revert_strike_logic($strikeId, $newStatus = 'EXPIRED', $restoreMedia = false) {
@@ -121,32 +122,12 @@ if (!function_exists('revert_strike_logic')) {
 
         $db->transStart();
 
-        // --- 1. Restore Points & Counts ---
         if ($strike->severity_points > 0 && $strike->type === 'STRIKE') {
             $db->query("UPDATE channels SET trust_score = LEAST(100, trust_score + ?), strikes_count = GREATEST(0, strikes_count - 1) WHERE id = ?", [$strike->severity_points, $strike->channel_id]);
-        } 
-        elseif ($strike->type === 'WARNING') {
-            $db->query("UPDATE channels SET warnings_count = GREATEST(0, warnings_count - 1) WHERE id = ?", [$strike->channel_id]);
         }
 
-        // --- 2. Log History ---
-        if ($strike->severity_points > 0) {
-            $channel = $db->table('channels')->select('user_id')->where('id', $strike->channel_id)->get()->getRow();
-            if ($channel) {
-                $db->table('trust_score_logs')->insert([
-                    'user_id'     => $channel->user_id,
-                    'channel_id'  => $strike->channel_id,
-                    'points'      => (int)$strike->severity_points,
-                    'action_type' => 'REWARD',
-                    'reason'      => ($newStatus === 'EXPIRED' ? 'Expired: ' : 'Revoked: ') . $strike->reason,
-                    'created_at'  => date('Y-m-d H:i:s')
-                ]);
-            }
-        }
-
-        // --- 3. Conditional Media Restore ---
         if ($restoreMedia && !empty($strike->content_id)) {
-            $table = ($strike->content_type == 'VIDEO') ? 'videos' : 'reels';
+            $table = ($strike->content_type === 'REEL') ? 'reels' : 'videos';
             $db->table($table)->where('id', $strike->content_id)->update([
                 'visibility'           => 'public', 
                 'copyright_status'     => 'NONE',
@@ -154,13 +135,7 @@ if (!function_exists('revert_strike_logic')) {
             ]);
         }
 
-        // --- 4. Final Record Update ---
-        $db->table('channel_strikes')->where('id', $strikeId)->update([
-            'status' => $newStatus,
-            'locked_by' => null,
-            'locked_at' => null
-        ]);
-
+        $db->table('channel_strikes')->where('id', $strikeId)->update(['status' => $newStatus]);
         $db->transComplete();
         return ['status' => $db->transStatus()];
     }

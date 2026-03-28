@@ -12,15 +12,15 @@ class UserModel extends Model
     protected $returnType       = 'array';
     protected $protectFields    = true;
 
-    // ✅ Soft Deletes Enabled
     protected $useSoftDeletes = true;
     protected $deletedField   = 'deleted_at';
 
-    // ✅ FIXED: unique_id ko allowedFields mein add kiya
+    // ✅ FIXED: 'country' ko yahan add kar diya gaya hai
     protected $allowedFields = [
-        'unique_id', // 👈 Ye add karna zaroori hai
+        'unique_id',
         'username', 'email', 'password', 'name', 'bio', 'avatar', 'cover_photo', 
-        'website', 'location', 'phone', 'preferred_currency',
+        'website', 'location', 'district', 'state', 'country', 'latitude', 'longitude', 
+        'phone', 'dob', 'gender', 'preferred_currency',
         'email_verified', 'is_verified', 'is_admin', 'is_creator', 'is_banned', 
         'admin_role', 'role_id', 'followers_count', 'following_count', 'posts_count', 
         'reels_count', 'videos_count', 'last_active', 'is_deleted', 'is_private', 
@@ -34,9 +34,6 @@ class UserModel extends Model
     protected $createdField  = 'created_at';
     protected $updatedField  = 'updated_at';
 
-    /**
-     * ✅ Master Casting: Updated to include unique_id
-     */
     public function castUserTypes($user)
     {
         if (!$user) return null;
@@ -45,7 +42,8 @@ class UserModel extends Model
             'email_verified', 'is_verified', 'is_admin', 'is_creator', 
             'is_deleted', 'is_banned', 'is_private', 'allow_comments',
             'is_following', 'is_followed_by_viewer', 'is_payout_setup',
-            'allow_global', 'allow_likes', 'allow_follows'
+            'allow_global', 'allow_likes', 'allow_follows',
+            'is_requested' // 🔥 Added for Private Account Sync
         ];
         
         foreach ($boolFields as $field) {
@@ -64,21 +62,20 @@ class UserModel extends Model
             }
         }
 
+        if (isset($user['latitude'])) $user['latitude'] = (float)$user['latitude'];
+        if (isset($user['longitude'])) $user['longitude'] = (float)$user['longitude'];
+
         return $user;
     }
 
-    /**
-     * ✅ Custom Profile Fetcher (SECURED)
-     * Added unique_id in select statement
-     */
     public function getProfile(int $targetUserId, ?int $viewerId = null)
     {
         $builder = $this->builder();
         
-        // 🔒 Added unique_id in select
+        // 🔥 Select mein 'country' already hai, toh yahan koi dikkat nahi thi
         $builder->select('
-            id, unique_id, username, email, name, bio, avatar, cover_photo, 
-            website, location, phone, preferred_currency, 
+            id, unique_id, username, email, name, dob, gender, bio, avatar, cover_photo, 
+            website, location, district, state, country, latitude, longitude, phone, preferred_currency, 
             is_verified, is_creator, is_admin, admin_role,
             followers_count, following_count, posts_count, reels_count, videos_count, 
             last_active, kyc_status, is_private, allow_comments,
@@ -86,10 +83,16 @@ class UserModel extends Model
         ');
 
         if ($viewerId && $viewerId != 0) {
-            $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = {$viewerId} AND following_id = users.id) as is_following");
-            $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = users.id AND following_id = {$viewerId}) as is_followed_by_viewer");
+            // ✅ Only 'accepted' means they are actually following
+            $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = {$viewerId} AND following_id = users.id AND status = 'accepted') as is_following");
+            
+            // ✅ Check if follow request is pending
+            $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = {$viewerId} AND following_id = users.id AND status = 'pending') as is_requested");
+            
+            // ✅ Check if target user follows the viewer
+            $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = users.id AND following_id = {$viewerId} AND status = 'accepted') as is_followed_by_viewer");
         } else {
-            $builder->select("0 as is_following, 0 as is_followed_by_viewer");
+            $builder->select("0 as is_following, 0 as is_requested, 0 as is_followed_by_viewer");
         }
 
         $user = $builder->where('users.id', $targetUserId)
@@ -100,4 +103,3 @@ class UserModel extends Model
         return $this->castUserTypes($user);
     }
 }
-

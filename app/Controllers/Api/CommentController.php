@@ -19,7 +19,7 @@ class CommentController extends BaseController
     {
         $this->commentModel = new CommentModel();
         $this->db = \Config\Database::connect();
-        helper(['url', 'text']);
+        helper(['url', 'text', 'media']);
         
         // ✅ Interaction Helper Initialized
         $this->interaction = new InteractionHelper();
@@ -71,10 +71,6 @@ class CommentController extends BaseController
             $insertID = $this->db->insertID();
             
             // 2. Interaction Logic (🔥 FIXED: Restriction removed for Viral Strategy)
-            // Humne 'if' condition hata di hai. Ab 'post' bhi helper ke paas jayega.
-            // Helper (InteractionHelper) khud check karega: 
-            // - Agar video/reel hai -> Points + Viral Score.
-            // - Agar post hai -> Sirf Viral Score (0 Points).
             $ownerId = $this->getContentOwnerId($type, $id);
             if ($ownerId && $ownerId != $currentUserId) {
                 $this->interaction->handleInteraction($ownerId, $currentUserId, $id, $type, 'comment');
@@ -114,11 +110,11 @@ class CommentController extends BaseController
         }
     }
 
-    // ... [Baki list aur delete functions same rahenge] ...
-
     public function list()
     {
-        $currentUserId = $this->request->getHeaderLine('User-ID');
+        $currentUserId = $this->request->getHeaderLine('User-ID') ?: 0;
+        $escapedUserId = $this->db->escape($currentUserId);
+        
         $type = $this->request->getGet('type') ?? $this->request->getVar('type');
         $id   = $this->request->getGet('id') ?? $this->request->getGet('post_id') ?? $this->request->getVar('id');
 
@@ -130,7 +126,11 @@ class CommentController extends BaseController
         if (!$type || !$id) return $this->fail('ID and Type required', 400);
 
         $builder = $this->db->table('comments c');
+        
+        // 🔥 Select with is_liked subquery and likes_count
         $builder->select('c.*, u.username, u.name, u.avatar, u.is_verified');
+        $builder->select("(SELECT COUNT(*) FROM likes WHERE likeable_type = 'comment' AND likeable_id = c.id AND user_id = {$escapedUserId}) as is_liked");
+        
         $builder->join('users u', 'u.id = c.user_id');
         $builder->where(['c.commentable_type' => $type, 'c.commentable_id' => $id]);
         $builder->orderBy('c.created_at', 'ASC'); 
@@ -152,6 +152,8 @@ class CommentController extends BaseController
                 'content'     => $row['content'],
                 'parent_id'   => $row['parent_id'],
                 'created_at'  => $row['created_at'],
+                'likes_count' => (int)$row['likes_count'], // 🔥 Added likes_count
+                'is_liked'    => (bool)$row['is_liked'],    // 🔥 Added is_liked status
                 'is_owner'    => (string)$row['user_id'] === (string)$currentUserId,
                 'user' => [
                     'id'          => (string)$row['user_id'],

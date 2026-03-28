@@ -70,24 +70,25 @@ class TrustController extends BaseController
                                 ->where(['user_id' => $userId, 'is_passed' => 1])
                                 ->countAllResults();
 
-            // 🛡️ COOLDOWN CALCULATOR (New Sync Logic)
-            $checkEligibility = function($reason, $days) use ($userId) {
-                $log = $this->db->table('trust_score_logs')
-                            ->where(['user_id' => $userId, 'reason' => $reason])
-                            ->orderBy('created_at', 'DESC')->get()->getRow();
-                
-                if (!$log) return ['eligible' => true, 'days_left' => 0];
-                
-                $nextTime = strtotime($log->created_at . " + $days days");
-                $isEligible = time() >= $nextTime;
-                $daysLeft = $isEligible ? 0 : ceil(($nextTime - time()) / 86400);
-                
-                return ['eligible' => $isEligible, 'days_left' => $daysLeft];
-            };
+            // 🛡️ RECOVERY STREAK LOGIC (Fixed: Check last PENALTY)
+            // A clean streak means no PENALTY in the last 15 days.
+            $lastPenalty = $this->db->table('trust_score_logs')
+                            ->where(['user_id' => $userId, 'action_type' => 'PENALTY'])
+                            ->orderBy('created_at', 'DESC')
+                            ->get()->getRow();
+            
+            $streakDaysLeft = 0;
+            $streakEligible = true;
 
-            $streak = $checkEligibility('Account Health: 15-Day Clean Streak', 15);
-            $engagement = $checkEligibility('Account Health: Genuine Engagement', 7);
-            $feedback = $checkEligibility('Account Health: Positive Audience Feedback', 15);
+            if ($lastPenalty) {
+                $penaltyTime = strtotime($lastPenalty->created_at);
+                $targetTime = $penaltyTime + (15 * 86400); // 15 days added to last penalty
+                
+                if (time() < $targetTime) {
+                    $streakEligible = false; // Streak is currently running (in progress)
+                    $streakDaysLeft = max(0, ceil(($targetTime - time()) / 86400));
+                }
+            }
 
             // 🟢 MAIN RESPONSE
             return $this->respond([
@@ -120,20 +121,14 @@ class TrustController extends BaseController
                     ]
                 ],
                 'penalty_guide' => [
+                    // 🔥 Fixed: Only sending the ones requested in UI
                     'video_strike'      => (int)($this->settings['trust_penalty_video_strike'] ?? 4),
-                    'channel_strike'    => (int)($this->settings['trust_penalty_channel_strike'] ?? 15),
-                    'copyright_strike'  => (int)($this->settings['trust_penalty_copyright_strike'] ?? 6),
-                    'guideline_strike'  => (int)($this->settings['trust_penalty_community_guideline_strike'] ?? 7),
                     'fake_report'       => (int)($this->settings['trust_penalty_fake_report'] ?? 2)
                 ],
                 'tasks_status' => [
-                    'quiz_completed' => (bool)$hasPassedQuiz,
-                    'streak_eligible' => (bool)$streak['eligible'],
-                    'streak_days_left' => (int)$streak['days_left'],
-                    'engagement_eligible' => (bool)$engagement['eligible'],
-                    'engagement_days_left' => (int)$engagement['days_left'],
-                    'feedback_eligible' => (bool)$feedback['eligible'],
-                    'feedback_days_left' => (int)$feedback['days_left']
+                    'quiz_completed'   => (bool)$hasPassedQuiz,
+                    'streak_eligible'  => $streakEligible,
+                    'streak_days_left' => $streakDaysLeft
                 ]
             ]);
 

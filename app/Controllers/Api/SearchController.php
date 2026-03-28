@@ -12,6 +12,42 @@ class SearchController extends BaseController {
         helper(['media', 'url']);
     }
 
+    /**
+     * 🔥 NEW: Get Suggestions (Explore Grid Logic)
+     * Task #7: Top Content for Empty Search
+     */
+    public function getSuggestions() {
+        // 1. Fetch Top Reels
+        $reels = $this->db->table('reels r')
+            ->select('r.id, r.unique_id, r.thumbnail_url, r.views_count, r.caption, "reel" as type')
+            ->where(['r.status' => 'published', 'r.visibility' => 'public'])
+            ->orderBy('r.views_count', 'DESC')
+            ->limit(10)
+            ->get()->getResultArray();
+
+        // 2. Fetch Top Videos
+        $videos = $this->db->table('videos v')
+            ->select('v.id, v.unique_id, v.thumbnail_url, v.views_count, v.title as caption, "video" as type')
+            ->where(['v.status' => 'published', 'v.visibility' => 'public'])
+            ->orderBy('v.views_count', 'DESC')
+            ->limit(10)
+            ->get()->getResultArray();
+
+        // 3. Mix & Format
+        $mixed = array_merge($reels, $videos);
+        shuffle($mixed); // Mix reels and videos randomly
+
+        foreach($mixed as &$item) {
+            $item['thumbnail_url'] = get_media_url($item['thumbnail_url']);
+            $item['id'] = (string)$item['id'];
+        }
+
+        return $this->respond([
+            'success' => true,
+            'results' => $mixed
+        ]);
+    }
+
     public function index() {
         $query = trim((string)$this->request->getGet('q'));
         $currentUserId = $this->request->getHeaderLine('User-ID') ?: 0;
@@ -33,6 +69,7 @@ class SearchController extends BaseController {
 
     /** 1. Accounts Search (Users + Channels) **/
     private function searchAccounts($q, $uid) {
+        $uid = $this->db->escape($uid); // Safe SQL
         return $this->db->table('users u')
             ->select('u.id, u.username, u.name, u.avatar, u.is_verified, u.followers_count')
             ->select("(SELECT COUNT(*) FROM follows WHERE follower_id = $uid AND following_id = u.id) as is_following")

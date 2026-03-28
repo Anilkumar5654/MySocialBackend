@@ -1,4 +1,11 @@
+<link rel="stylesheet" href="<?= base_url('assets/css/variables.css') ?>">
+<link rel="stylesheet" href="<?= base_url('assets/css/components.css') ?>">
+
 <style>
+  /* 👇 TERA CUSTOM PAGE STYLING 👇 */
+  
+  /* Note: Agar tu chahe toh in :root variables ko bhi apni assets/css/variables.css 
+     mein daal sakta hai taaki code 100% clean ho jaye, par yahan bhi theek hai! */
   :root {
     --bg-light: #f4f7fa;
     --sidebar-dark: #343e5a;

@@ -45,7 +45,7 @@ class TrackingController extends BaseController {
             
             if (!$ad_id) return $this->fail("Invalid Ad ID");
 
-            // 🔍 1. Ad Data
+            // 🔍 1. Ad Details
             $ad = $this->db->table('ads')
                 ->select('ads.*, users.avatar as advertiser_avatar, users.username as advertiser_name')
                 ->join('users', 'users.id = ads.advertiser_id', 'left')
@@ -54,7 +54,7 @@ class TrackingController extends BaseController {
 
             if (!$ad || $ad->status !== 'active') return $this->respond(['status' => false]);
 
-            // 🔥 2. SMART COST ROUTING
+            // 🔥 2. Cost Calculation
             $cost = 0;
             $bid_type = $ad->bid_type;
 
@@ -68,77 +68,65 @@ class TrackingController extends BaseController {
                 $cost = (float)($this->ad_config['min_cpc_bid'] ?? 0.50);
             }
 
-            // 🛡️ 3. Helper Logic
+            // 🛡️ 3. Revenue Sharing
             $sharePercent = (int)($this->ad_config['revenue_share_ads'] ?? 50);
             $logic = $this->security->getRevenueLogic($video_id, $is_reel, $cost, $sharePercent, $ad->advertiser_id);
             
             $viewer_id = $this->request->getHeaderLine('User-ID');
             $device_id = $this->request->getHeaderLine('Device-ID') ?: ($json['device_id'] ?? 'unknown');
 
-            // ✅ NAYA FREQUENCY CAPPING (UPSERT LOGIC)
-            // Ise Fraud Check se pehle rakha hai taaki skip logic hamesha kaam kare
+            // ✅ SKIP LOGIC DATA (ad_logs update)
             if ($type === 'views' && $viewer_id) {
                 $today = date('Y-m-d');
                 $existingLog = $this->db->table('ad_logs')
-                    ->where('user_id', $viewer_id)
-                    ->where('ad_id', $ad_id)
+                    ->where(['user_id' => $viewer_id, 'ad_id' => $ad_id])
                     ->where('DATE(created_at)', $today)
                     ->get()->getRow();
 
                 if ($existingLog) {
-                    $this->db->table('ad_logs')->where('id', $existingLog->id)
-                        ->set('view_count', 'view_count + 1', false)
-                        ->update();
+                    $this->db->table('ad_logs')->where('id', $existingLog->id)->set('view_count', 'view_count + 1', false)->update();
                 } else {
                     $this->db->table('ad_logs')->insert([
-                        'user_id'    => $viewer_id,
-                        'ad_id'      => $ad_id,
-                        'placement'  => ($logic['actual_is_reel'] ?? $is_reel) ? 'reel' : 'feed',
-                        'action'     => 'view',
-                        'view_count' => 1,
-                        'created_at' => date('Y-m-d H:i:s')
+                        'user_id' => $viewer_id, 'ad_id' => $ad_id, 'placement' => ($logic['actual_is_reel'] ?? $is_reel) ? 'reel' : 'feed',
+                        'action' => 'view', 'view_count' => 1, 'created_at' => date('Y-m-d H:i:s')
                     ]);
                 }
             }
 
-            // 🛡️ 4. Fraud & Capping (Paisa katne wala logic yahan se shuru)
+            // 🛡️ 4. ANTI-SPAM PROTECTION (Lightweight 30 Sec Check)
+            $targetTable = ($type === 'views') ? 'ad_views' : (($type === 'clicks') ? 'ad_clicks' : 'ad_impressions');
+            
+            $spamCheck = $this->db->table($targetTable)
+                ->where('ad_id', $ad_id)
+                ->where('user_id', $viewer_id)
+                ->where('created_at >', date('Y-m-d H:i:s', strtotime('-30 seconds')))
+                ->countAllResults();
+            
+            if ($spamCheck > 0) return $this->respond(['status' => true, 'debug' => 'Spam-Protected']);
+
             if ($this->security->isFraud($viewer_id, $logic['creator_id'])) return $this->respond(['status' => true, 'debug' => 'Self-view ignored']);
 
-            $targetTable = ($type === 'views') ? 'ad_views' : (($type === 'clicks') ? 'ad_clicks' : 'ad_impressions');
-            $fraudCheck = $this->db->table($targetTable)->where('ad_id', $ad_id)
-                ->groupStart()->where('device_id', $device_id)->orWhere('ip_address', $this->request->getIPAddress())->groupEnd()
-                ->where('created_at >', date('Y-m-d H:i:s', strtotime('-24 hours')))->countAllResults();
-            
-            if ($fraudCheck > 0) return $this->respond(['status' => true, 'debug' => 'Capped']);
-
-            // 🔥 5. POLYMORPHIC DATA MAPPING
+            // 🔥 5. Polymorphic Setup
             $final_is_reel = $logic['actual_is_reel'] ?? $is_reel;
             $content_id = $video_id > 0 ? $video_id : null;
-            $content_type = null;
-            
-            if ($content_id) {
-                $content_type = $final_is_reel ? 'reel' : 'video'; 
-            }
+            $content_type = $content_id ? ($final_is_reel ? 'reel' : 'video') : null;
 
-            // ⚡ 6. Database Engine (Transaction)
+            // ⚡ 6. Database Execution (FASTEST - No reach calculation here)
             $this->db->transStart(); 
             
-            // Stats update & Cost deduction
-            $this->db->table('ads')->where('id', $ad_id)->set($type, "$type + 1", false)->set('spent', "spent + $cost", false)->update();
+            // Ad statistics update
+            $this->db->table('ads')->where('id', $ad_id)
+                ->set($type, "$type + 1", false)
+                ->set('spent', "spent + $cost", false)
+                ->update();
 
-            // Insert Entry into original table
+            // Insert tracking record (Fire & Forget)
             $logData = [
-                'ad_id' => $ad_id, 
-                'user_id' => $viewer_id ?: null, 
-                'creator_id' => $logic['creator_id'] ?: null,
-                'device_id' => $device_id, 
-                'ip_address' => $this->request->getIPAddress(), 
-                'content_type' => $content_type, 
-                'content_id' => $content_id,     
-                'cost' => $cost, 
-                'creator_revenue' => $logic['revenue'], 
-                'is_settled' => 0, 
-                'created_at' => date('Y-m-d H:i:s')
+                'ad_id' => $ad_id, 'user_id' => $viewer_id ?: null, 'creator_id' => $logic['creator_id'] ?: null,
+                'device_id' => $device_id, 'ip_address' => $this->request->getIPAddress(), 
+                'content_type' => $content_type, 'content_id' => $content_id,     
+                'cost' => $cost, 'creator_revenue' => $logic['revenue'], 
+                'is_settled' => 0, 'created_at' => date('Y-m-d H:i:s')
             ];
             
             if ($type === 'impressions') unset($logData['creator_revenue'], $logData['is_settled'], $logData['creator_id']);
@@ -146,11 +134,10 @@ class TrackingController extends BaseController {
             $this->db->table($targetTable)->insert($logData);
 
             if ($type === 'views' && $content_id && $content_type) {
-                $tableName = $content_type . 's'; 
-                $this->db->table($tableName)->where('id', $content_id)->increment('views_count');
+                $this->db->table($content_type . 's')->where('id', $content_id)->increment('views_count');
             }
 
-            // 🛑 AUTO-STOP LOGIC
+            // 🛑 AUTO-STOP (Budget Exceeded)
             if (($ad->spent + $cost) >= $ad->budget) {
                 $this->db->table('ads')->where('id', $ad_id)->update(['status' => 'inactive']);
             }

@@ -11,7 +11,7 @@ class Strikes extends BaseController
 
     public function __construct() {
         $this->db = \Config\Database::connect();
-        // Sabhi helpers loaded hain
+        // Helpers loaded
         helper(['admin/strike', 'text', 'date', 'admin_helper']); 
     }
 
@@ -67,7 +67,7 @@ class Strikes extends BaseController
         $this->autoUnlockCases('PENDING_REVIEW');
 
         $claims = $this->db->table('channel_strikes as s')
-            ->select('s.*, offender.name as channel_name, offender.handle as offender_handle, reporter.name as reporter_name, reporter.handle as reporter_handle')
+            ->select('s.*, offender.name as channel_name, offender.handle as offender_handle, offender.avatar as offender_avatar, reporter.name as reporter_name, reporter.handle as reporter_handle')
             ->join('channels as offender', 'offender.id = s.channel_id', 'left')
             ->join('channels as reporter', 'reporter.id = s.reporter_channel_id', 'left')
             ->where('s.type', 'PENDING_REVIEW') 
@@ -90,7 +90,7 @@ class Strikes extends BaseController
         $this->autoUnlockCases('APPEAL');
 
         $appeals = $this->db->table('channel_strikes as s')
-            ->select('s.*, offender.name as channel_name, offender.handle as offender_handle, offender.avatar as offender_avatar, reporter.name as reporter_name')
+            ->select('s.*, offender.name as channel_name, offender.handle as offender_handle, offender.avatar as offender_avatar, reporter.name as reporter_name, reporter.handle as reporter_handle')
             ->join('channels as offender', 'offender.id = s.channel_id', 'left')
             ->join('channels as reporter', 'reporter.id = s.reporter_channel_id', 'left')
             ->where('s.appeal_status', 'PENDING') 
@@ -128,8 +128,6 @@ class Strikes extends BaseController
         }
 
         try {
-            $this->db->transStart();
-
             // Handle REJECT
             if ($decision === 'REJECT') {
                 $fakePenalty = (int)get_strike_setting_value('trust_penalty_fake_report', 3);
@@ -137,7 +135,6 @@ class Strikes extends BaseController
                     $this->db->query("UPDATE channels SET trust_score = GREATEST(0, CAST(trust_score AS SIGNED) - ?) WHERE id = ?", [$fakePenalty, $request->reporter_channel_id]);
                 }
                 $this->db->table('channel_strikes')->where('id', $requestId)->update(['status' => 'REJECTED', 'locked_by' => null, 'locked_at' => null]);
-                $this->db->transComplete(); 
                 return redirect()->back()->with('success', "Report Rejected.");
             }
 
@@ -145,36 +142,45 @@ class Strikes extends BaseController
             $type = ($decision === 'SEND_WARNING') ? 'WARNING' : (($decision === 'REVENUE_CLAIM') ? 'CLAIM' : 'STRIKE');
             if ($type !== 'STRIKE') $points = 0;
 
-            // Blacklist (Hash) Logic
+            $targetTable = (strtoupper($request->content_type) === 'VIDEO') ? 'videos' : 'reels';
+
+            // 🔥 FIX: Check explicitly before inserting into Blacklist
             if (!empty($originalId)) {
-                $targetTable = (strtoupper($request->content_type) === 'VIDEO') ? 'videos' : 'reels';
                 $offending = $this->db->table($targetTable)->select('video_hash')->where('id', $request->content_id)->get()->getRow();
+                
                 if ($offending && !empty($offending->video_hash)) {
-                    $exists = $this->db->table('copyright_blacklist')->where('banned_hash', $offending->video_hash)->countAllResults();
-                    if ($exists == 0) {
+                    $hashExists = $this->db->table('copyright_blacklist')->where('banned_hash', $offending->video_hash)->countAllResults();
+                    
+                    if ($hashExists == 0) {
                         $this->db->table('copyright_blacklist')->insert([
                             'banned_hash'       => $offending->video_hash,
                             'original_video_id' => $originalId,
-                            'reason'            => 'Manual Action: ' . $decision,
-                            'created_at'        => date('Y-m-d H:i:s')
+                            'reason'            => 'Manual Action: ' . $decision
                         ]);
                     }
                 }
             }
 
-            // Revenue Share Processing
+            // 🔥 FIX: Check explicitly before inserting Revenue Share
             if ($decision === 'REVENUE_CLAIM' && !empty($originalId)) {
                 $orig = $this->db->table('videos')->where('id', $originalId)->get()->getRow();
-                $uploader = $this->db->table('videos')->where('id', $request->content_id)->get()->getRow();
+                $uploader = $this->db->table($targetTable)->where('id', $request->content_id)->get()->getRow();
+                
                 if ($orig && $uploader) {
-                    $this->db->table('revenue_shares')->insert([
-                        'claimed_content_id' => $request->content_id,
-                        'content_type'       => strtoupper($request->content_type),
-                        'original_creator_id'=> $orig->user_id,
-                        'uploader_id'        => $uploader->user_id,
-                        'status'             => 'ACTIVE',
-                        'created_at'         => date('Y-m-d H:i:s')
-                    ]);
+                    $claimExists = $this->db->table('revenue_shares')
+                        ->where('claimed_content_id', $request->content_id)
+                        ->where('content_type', strtoupper($request->content_type))
+                        ->countAllResults();
+
+                    if ($claimExists == 0) {
+                        $this->db->table('revenue_shares')->insert([
+                            'claimed_content_id'  => $request->content_id,
+                            'content_type'        => strtoupper($request->content_type),
+                            'original_creator_id' => $orig->user_id,
+                            'uploader_id'         => $uploader->user_id,
+                            'status'              => 'ACTIVE'
+                        ]);
+                    }
                 }
             }
 
@@ -190,10 +196,13 @@ class Strikes extends BaseController
                 'original_content_id' => $originalId
             ];
             
-            execute_strike_logic($data, $requestId);
+            $result = execute_strike_logic($data, $requestId);
             
-            $this->db->transComplete();
-            return redirect()->to('admin/moderation/strikes')->with('success', "Decision applied.");
+            if ($result['status']) {
+                return redirect()->to('admin/moderation/strikes')->with('success', "Decision applied successfully.");
+            } else {
+                return redirect()->back()->with('error', "Database Execution Failed. Check Log.");
+            }
 
         } catch (Throwable $e) {
             return redirect()->back()->with('error', $e->getMessage());
@@ -209,7 +218,7 @@ class Strikes extends BaseController
         $status = $this->request->getPost('status'); 
         try {
             if ($status == 'APPROVED') {
-                revert_strike_logic($id, 'APPEAL_APPROVED');
+                revert_strike_logic($id, 'APPEAL_APPROVED', true);
                 $this->db->table('channel_strikes')->where('id', $id)->update(['appeal_status' => 'APPROVED', 'locked_by' => null, 'locked_at' => null]);
             } else {
                 $this->db->table('channel_strikes')->where('id', $id)->update(['appeal_status' => 'REJECTED', 'status' => 'REJECTED', 'locked_by' => null, 'locked_at' => null]);
@@ -226,7 +235,7 @@ class Strikes extends BaseController
     public function remove_manual($id)
     {
         try {
-            revert_strike_logic($id, 'REMOVED_BY_ADMIN'); 
+            revert_strike_logic($id, 'REMOVED_BY_ADMIN', true); 
             return redirect()->back()->with('success', "Action revoked.");
         } catch (Throwable $e) { 
             return redirect()->back()->with('error', $e->getMessage()); 
@@ -234,11 +243,10 @@ class Strikes extends BaseController
     }
 
     /**
-     * 🔍 7. VIEW CASE (UPGRADED WITH SIDE-BY-SIDE ANALYTICS)
+     * 🔍 7. VIEW CASE
      */
     public function view($id)
     {
-        // 1. Fetch Strike & Channel Details
         $strike = $this->db->table('channel_strikes as s')
             ->select('s.*, offender.name as channel_name, offender.handle as offender_handle, offender.avatar as offender_avatar, offender.strikes_count, reporter.name as reporter_name, reporter.handle as reporter_handle')
             ->join('channels as offender', 'offender.id = s.channel_id', 'left')
@@ -247,13 +255,12 @@ class Strikes extends BaseController
 
         if (!$strike) return redirect()->to('admin/moderation/strikes')->with('error', 'Record not found.');
 
-        // Admin Locking logic
+        // Admin Locking
         $adminId = session()->get('id');
         $this->db->table('channel_strikes')->where('id', $id)->update(['locked_by' => $adminId, 'locked_at' => date('Y-m-d H:i:s')]);
 
         $targetTable = (strtoupper($strike->content_type) === 'REEL') ? 'reels' : 'videos';
 
-        // 🎯 OFFENDER VIDEO DETAILS (Upload Date + Views)
         $offenderMedia = $this->db->table($targetTable)
             ->select('video_url, thumbnail_url, created_at as upload_date, views_count')
             ->where('id', $strike->content_id)->get()->getRow();
@@ -263,7 +270,6 @@ class Strikes extends BaseController
         $strike->offender_upload_date = $offenderMedia->upload_date ?? null;
         $strike->offender_views = $offenderMedia->views_count ?? 0;
 
-        // 🎯 ORIGINAL VIDEO DETAILS (Join with Channels to get Owner Name)
         $strike->original_video_url = null;
         $strike->original_upload_date = null;
         $strike->original_owner_name = 'External/Evidence Link';
@@ -302,8 +308,8 @@ class Strikes extends BaseController
 
     private function getContentTitle($type, $id) {
         if (!$id) return 'System';
-        $table = ($type == 'VIDEO') ? 'videos' : 'reels';
-        $col = ($type == 'VIDEO') ? 'title' : 'caption'; 
+        $table = (strtoupper($type) == 'VIDEO') ? 'videos' : 'reels';
+        $col = (strtoupper($type) == 'VIDEO') ? 'title' : 'caption'; 
         $row = $this->db->table($table)->select($col)->where('id', $id)->get()->getRow();
         return $row ? $row->$col : 'Deleted Content';
     }

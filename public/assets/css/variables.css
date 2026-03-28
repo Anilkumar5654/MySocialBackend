@@ -1,0 +1,59 @@
+:root {
+    /* 🎨 Color Palette */
+    --color-bg-body: #f4f7fa;
+    --color-bg-surface: #ffffff;
+    --color-bg-surface-muted: #f8f9fa;
+    
+    --color-text-primary: #111827;
+    --color-text-secondary: #4b5563;
+    --color-text-muted: #9ca3af;
+    --color-text-inverse: #ffffff;
+
+    --color-border-subtle: #e5e7eb;
+    --color-border-default: #d1d5db;
+
+    --color-brand-primary: #3b82f6;
+    --color-brand-primary-hover: #2563eb;
+    
+    --color-accent-success: #10b981;
+    --color-accent-success-muted: rgba(16, 185, 129, 0.1);
+    --color-accent-warning: #f59e0b;
+    --color-accent-danger: #ef4444;
+    --color-accent-danger-muted: rgba(239, 68, 68, 0.1);
+
+    /* 📦 Shadows */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --shadow-hover: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+
+    /* 🔲 Border Radius */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+
+    /* 📏 Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    /* 🔤 Typography */
+    --font-size-xs: 11px;
+    --font-size-sm: 13px;
+    --font-size-md: 15px;
+    --font-size-lg: 18px;
+    --font-size-xl: 24px;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --font-weight-black: 900;
+
+    /* 🧩 Component Variables */
+    --btn-height-action: 48px;
+    --avatar-size-sm: 45px;
+    --avatar-size-lg: 100px;
+}

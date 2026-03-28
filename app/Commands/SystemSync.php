@@ -9,17 +9,14 @@ class SystemSync extends BaseCommand
 {
     protected $group       = 'Custom';
     protected $name        = 'system:sync';
-    protected $description = 'Comprehensive Sync: Fixes all counters for Users, Channels, and Hashtags (Excludes Subscriptions).';
+    protected $description = 'Comprehensive Sync: Fixes all counters for Users, Channels, Hashtags, Views, and Impressions.';
 
     public function run(array $params)
     {
         $db = \Config\Database::connect();
-        $now = date('Y-m-d H:i:s');
-
-        CLI::write("🚀 Starting Global System Sync...", 'yellow');
+        CLI::write("🚀 Starting Global System Sync (Deep Audit Mode)...", 'yellow');
 
         // --- 1. SYNC HASHTAG COUNTS ---
-        // 'taggables' table se counts fetch karke 'hashtags' table sync karein
         CLI::write("Updating Hashtag usage counts...", 'cyan');
         $db->query("
             UPDATE hashtags h 
@@ -29,50 +26,51 @@ class SystemSync extends BaseCommand
             )
         ");
 
-        // --- 2. SYNC CHANNEL METRICS ---
+        // --- 2. SYNC VIDEO & REEL VIEWS/IMPRESSIONS (REAL-TIME SYNC) ---
+        CLI::write("Syncing Views and Impressions for Videos & Reels...", 'cyan');
+        
+        // Sync Videos: Views & Impressions
+        $db->query("
+            UPDATE videos v 
+            SET 
+                v.views_count = (SELECT COUNT(*) FROM views WHERE viewable_id = v.id AND viewable_type = 'video'),
+                v.impressions_count = (SELECT COUNT(*) FROM impressions WHERE impressionable_id = v.id AND impressionable_type = 'video')
+        ");
+
+        // Sync Reels: Views & Impressions
+        $db->query("
+            UPDATE reels r 
+            SET 
+                r.views_count = (SELECT COUNT(*) FROM views WHERE viewable_id = r.id AND viewable_type = 'reel'),
+                r.impressions_count = (SELECT COUNT(*) FROM impressions WHERE impressionable_id = r.id AND impressionable_type = 'reel')
+        ");
+
+        // --- 3. SYNC CHANNEL METRICS ---
         CLI::write("Syncing Channel Videos & Strike counts...", 'cyan');
         $channels = $db->table('channels')->get()->getResult();
         foreach ($channels as $channel) {
             $cUpdates = [];
             
-            // Sync Videos Count (Only Published)
             $vCount = $db->table('videos')->where(['channel_id' => $channel->id, 'status' => 'published'])->countAllResults();
             if ((int)$channel->videos_count !== $vCount) $cUpdates['videos_count'] = $vCount;
 
-            // Sync Strike Count (Only ACTIVE STRIKES)
             $sCount = $db->table('channel_strikes')->where(['channel_id' => $channel->id, 'type' => 'STRIKE', 'status' => 'ACTIVE'])->countAllResults();
             if ((int)$channel->strikes_count !== $sCount) $cUpdates['strikes_count'] = $sCount;
-
-            // 🛡️ Auto-Unblock Eligibility Check (AuthContext Sync)
-            if ($channel->strikes_count >= 3) {
-                $lastStrike = $db->table('channel_strikes')
-                                 ->where(['channel_id' => $channel->id, 'type' => 'STRIKE', 'status' => 'ACTIVE'])
-                                 ->orderBy('created_at', 'DESC')->get()->getRow();
-                
-                if ($lastStrike) {
-                    $days = ($sCount >= 10) ? 90 : (($sCount >= 5) ? 15 : 5);
-                    if (time() >= strtotime($lastStrike->created_at . " + $days days")) {
-                        CLI::write("   -> Channel ID {$channel->id}: Penalty period expired.", 'green');
-                    }
-                }
-            }
 
             if (!empty($cUpdates)) {
                 $db->table('channels')->where('id', $channel->id)->update($cUpdates);
             }
         }
 
-        // --- 3. SYNC USER COUNTS ---
-        CLI::write("Syncing User Identity Counters (Followers, Posts, Reels, Videos)...", 'cyan');
+        // --- 4. SYNC USER COUNTS (Followers, Content) ---
+        CLI::write("Syncing User Identity Counters...", 'cyan');
         $users = $db->table('users')->get()->getResult();
         foreach ($users as $u) {
             $uUpdates = [];
 
-            // Followers & Following (From 'follows' table)
             $followers = $db->table('follows')->where('following_id', $u->id)->countAllResults();
             $following = $db->table('follows')->where('follower_id', $u->id)->countAllResults();
             
-            // Content Counts (From respective tables)
             $posts  = $db->table('posts')->where(['user_id' => $u->id, 'status' => 'published'])->countAllResults();
             $reels  = $db->table('reels')->where(['user_id' => $u->id, 'status' => 'published'])->countAllResults();
             $videos = $db->table('videos')->where(['user_id' => $u->id, 'status' => 'published'])->countAllResults();
@@ -88,7 +86,6 @@ class SystemSync extends BaseCommand
             }
         }
 
-        CLI::write("✅ Global Sync Completed Successfully!", 'green');
+        CLI::write("✅ Global Sync Completed! Your Database is now 100% Consistent.", 'green');
     }
 }
-

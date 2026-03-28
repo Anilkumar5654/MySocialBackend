@@ -7,41 +7,33 @@
     .card-pro { background: #fff; border: none; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 25px; overflow: hidden; }
     .card-header-pro { background: #f8f9fa; border-bottom: 1px solid var(--border-soft); padding: 15px 20px; }
     
-    .video-wrapper-pro { 
-        width: 100%; background: #000; border-radius: 12px; overflow: hidden; 
-        border: 1px solid var(--border-soft); position: relative; 
-    }
-    .video-label-pro { 
-        position: absolute; top: 12px; left: 12px; z-index: 10; font-size: 9px; 
-        font-weight: 800; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; 
-        letter-spacing: 0.5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    
-    /* 🔥 ID BADGE OVER VIDEO */
-    .video-id-badge { 
-        position: absolute; top: 12px; right: 12px; z-index: 10; font-size: 10px; 
-        font-weight: 800; padding: 4px 10px; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); 
-    }
-
-    .decision-footer-pro { 
-        position: sticky; bottom: 0; background: #fff; border-top: 1px solid var(--border-soft); 
-        padding: 20px; margin: 25px -25px -25px -25px; z-index: 1000; 
-        box-shadow: 0 -10px 30px rgba(0,0,0,0.05); 
-    }
-
+    .video-wrapper-pro { width: 100%; background: #000; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-soft); position: relative; }
+    .video-label-pro { position: absolute; top: 12px; left: 12px; z-index: 10; font-size: 9px; font-weight: 800; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    .video-id-badge { position: absolute; top: 12px; right: 12px; z-index: 10; font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .decision-footer-pro { position: sticky; bottom: 0; background: #fff; border-top: 1px solid var(--border-soft); padding: 20px; margin: 25px -25px -25px -25px; z-index: 1000; box-shadow: 0 -10px 30px rgba(0,0,0,0.05); }
     .label-pro { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 4px; letter-spacing: 0.5px; }
     .black-text { color: #000 !important; font-weight: 700; }
-    
-    .owner-avatar-pro { 
-        width: 80px; height: 80px; border-radius: 15px; border: 4px solid #fff; 
-        object-fit: cover; background: #f8f9fa; box-shadow: var(--card-shadow); 
-    }
-
+    .owner-avatar-pro { width: 80px; height: 80px; border-radius: 15px; border: 4px solid #fff; object-fit: cover; background: #f8f9fa; box-shadow: var(--card-shadow); }
     .claim-info-box { background: #fff5f5; border: 1px solid #ffe3e3; border-radius: 10px; padding: 15px; margin-bottom: 20px; border-left: 5px solid red; }
     .data-detail-box { background: #f8f9fa; border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-top: 10px; }
 </style>
 
 <div class="container-fluid p-4">
+
+    <?php if (session()->getFlashdata('success')): ?>
+        <div class="alert alert-success alert-dismissible fade show shadow-sm" role="alert" style="border-radius: 10px; font-weight: 600;">
+            <i class="fas fa-check-circle mr-2"></i> <?= session()->getFlashdata('success') ?>
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+    <?php endif; ?>
+
+    <?php if (session()->getFlashdata('error')): ?>
+        <div class="alert alert-danger alert-dismissible fade show shadow-sm" role="alert" style="border-radius: 10px; font-weight: 600;">
+            <i class="fas fa-exclamation-circle mr-2"></i> <?= session()->getFlashdata('error') ?>
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+    <?php endif; ?>
+
     <div class="d-flex justify-content-between align-items-center mb-4">
         <a href="<?= base_url('admin/moderation/strikes/claims') ?>" class="btn btn-light btn-sm shadow-sm font-weight-bold" style="border: 1px solid var(--border-soft); border-radius: 8px;">
             <i class="fas fa-arrow-left mr-1"></i> BACK

@@ -54,7 +54,7 @@ class VideoController extends BaseController
     }
 
     /**
-     * 🔥 NORMALIZER - camelCase hatao, values ko bool karo
+     * 🔥 NORMALIZER
      */
     private function normalizeKeys(array $item): array
     {
@@ -277,60 +277,82 @@ class VideoController extends BaseController
     }
 
     /**
-     * ✅ 7. TRACK WATCH TIME (REAL RETENTION FIXED)
+     * ✅ 7. TRACK WATCH TIME (PERMANENT SYNC & UPSERT LOGIC)
      */
     public function trackWatch()
     {
         $input = $this->getRequestInput();
         $id = $input['video_id'] ?? $input['id'] ?? null;
         $watchDuration = (int)($input['watch_duration'] ?? 0);
-        $deviceId = $input['device_id'] ?? null;
         $userId = $this->request->getHeaderLine('User-ID') ?: null;
+        $ipAddress = $this->request->getIPAddress();
+        $timestamp = date('Y-m-d H:i:s');
+        
+        // 🔥 FIXED: Traffic source pakdo aur 'direct' default rakho
+        $trafficSource = $input['traffic_source'] ?? 'direct';
 
-        if (!$id) return $this->fail(['error' => 'Video ID missing']);
-        if ($watchDuration < 1) return $this->respond(['success' => true]);
+        if (!$id || $watchDuration < 1) return $this->respond(['success' => true]);
 
-        // 1. Duration fetch karo completion rate ke liye
-        $video = $this->videoModel->select('id, duration')->groupStart()->where('id', $id)->orWhere('unique_id', $id)->groupEnd()->first();
+        $video = $this->videoModel->select('id, duration, user_id')->groupStart()->where('id', $id)->orWhere('unique_id', $id)->groupEnd()->first();
         if (!$video) return $this->failNotFound();
         
         $actualId = $video['id'];
         $totalDuration = (int)$video['duration'];
 
         try {
-            // 🔥 REAL RETENTION CALCULATION
-            $completionRate = 0;
-            if ($totalDuration > 0) {
-                $completionRate = ($watchDuration / $totalDuration) * 100;
-                if ($completionRate > 100) $completionRate = 100; 
+            $this->db->transStart();
+
+            // 🔥 Logic: Find if a session exists for this user/ip in the last 30 minutes
+            $existingView = $this->db->table('views')
+                ->where(['viewable_id' => $actualId, 'viewable_type' => 'video'])
+                ->groupStart()
+                    ->where('user_id', $userId)
+                    ->orWhere('ip_address', $ipAddress)
+                ->groupEnd()
+                ->where('created_at >=', date('Y-m-d H:i:s', strtotime('-30 minutes')))
+                ->orderBy('id', 'DESC')
+                ->get()->getRow();
+
+            if ($existingView) {
+                // ✅ UPDATE EXISTING SESSION (No new view counted)
+                $newDuration = $existingView->watch_duration + $watchDuration;
+                $newCompletion = ($totalDuration > 0) ? min(100, ($newDuration / $totalDuration) * 100) : 0;
+
+                $this->db->table('views')->where('id', $existingView->id)->update([
+                    'watch_duration'  => $newDuration,
+                    'completion_rate' => $newCompletion,
+                    'updated_at'      => $timestamp
+                ]);
+            } else {
+                // ✅ CREATE NEW SESSION (Counts as +1 View)
+                $completionRate = ($totalDuration > 0) ? min(100, ($watchDuration / $totalDuration) * 100) : 0;
+                $this->db->table('views')->insert([
+                    'user_id'         => $userId,
+                    'creator_id'      => $video['user_id'],
+                    'viewable_id'     => $actualId,
+                    'viewable_type'   => 'video',
+                    'watch_duration'  => $watchDuration,
+                    'completion_rate' => $completionRate,
+                    'ip_address'      => $ipAddress,
+                    'traffic_source'  => $trafficSource, 
+                    'created_at'      => $timestamp,
+                    'updated_at'      => $timestamp
+                ]);
             }
 
-            $ipAddress = $this->request->getIPAddress();
-            
-            // 2. Data insert with completion_rate
-            $this->db->table('video_watch_sessions')->insert([
-                'user_id' => $userId,
-                'video_id' => $actualId,
-                'video_type' => 'video',
-                'watch_duration' => $watchDuration,
-                'completion_rate' => $completionRate, 
-                'device_id' => $deviceId,
-                'ip_address' => $ipAddress,
-                'created_at' => date('Y-m-d H:i:s')
+            // 🔥 FORCE SYNC: Calculate total unique sessions for real view count
+            $realCount = $this->db->table('views')
+                ->where(['viewable_id' => $actualId, 'viewable_type' => 'video'])
+                ->countAllResults();
+
+            $this->videoModel->update($actualId, ['views_count' => $realCount]);
+
+            $this->db->transComplete();
+
+            return $this->respond([
+                'success' => true, 
+                'synced_views' => (int)$realCount
             ]);
-
-            // 3. Views logic
-            $builder = $this->db->table('video_watch_sessions')
-                ->where('video_id', $actualId)
-                ->where('created_at >=', date('Y-m-d H:i:s', strtotime('-12 hours')));
-
-            if ($userId) $builder->where('user_id', $userId);
-            else $builder->where('ip_address', $ipAddress);
-
-            if ($builder->countAllResults() <= 1) {
-                $this->videoModel->where('id', $actualId)->increment('views_count');
-            }
-            return $this->respond(['success' => true]);
         } catch (\Exception $e) {
             return $this->failServerError($e->getMessage());
         }
@@ -351,6 +373,10 @@ class VideoController extends BaseController
         $builder = $this->videoModel->builder();
         $builder->select('videos.*, u.name as display_name, u.username as handle, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, u.followers_count');
         $builder->select("(CASE WHEN (SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = videos.user_id LIMIT 1) THEN 1 ELSE 0 END) as is_following");
+        
+        // 🔥 NAYA LOGIC: Fetch notification preference from follows table
+        $builder->select("(SELECT notification_pref FROM follows WHERE follower_id = {$escapedUserId} AND following_id = videos.user_id LIMIT 1) as notification_pref");
+        
         $builder->join('users u', 'u.id = videos.user_id', 'left');
 
         $builder->groupStart()
@@ -366,8 +392,15 @@ class VideoController extends BaseController
         $video['is_disliked'] = $this->db->table('video_dislikes')->where(['video_id' => $actualId, 'user_id' => $currentUserId])->countAllResults() > 0;
         $video['is_saved'] = $this->db->table('saves')->where(['saveable_id' => $actualId, 'saveable_type' => 'video', 'user_id' => $currentUserId])->countAllResults() > 0;
 
+        // 🔥 Added likes_count and is_liked subquery to recentComment securely
         $recentComment = $this->db->table('comments')
-            ->select('comments.content as text, users.avatar as user_avatar, users.name as user_name')
+            ->select('
+                comments.content as text, 
+                users.avatar as user_avatar, 
+                users.name as user_name,
+                comments.likes_count,
+                (SELECT COUNT(*) FROM likes WHERE likeable_type = "comment" AND likeable_id = comments.id AND user_id = ' . $escapedUserId . ') as is_liked
+            ')
             ->join('users', 'users.id = comments.user_id')
             ->where('comments.commentable_id', $actualId)
             ->where('comments.commentable_type', 'video')
@@ -378,6 +411,8 @@ class VideoController extends BaseController
 
         if ($recentComment) {
             $recentComment['user_avatar'] = $this->processMediaUrl($recentComment['user_avatar']);
+            $recentComment['is_liked'] = (bool)$recentComment['is_liked'];
+            $recentComment['likes_count'] = (int)$recentComment['likes_count'];
             $video['recent_comment'] = $recentComment;
         }
 
@@ -393,6 +428,10 @@ class VideoController extends BaseController
         $video['subscribers_count'] = $video['followers_count'];
         $video['is_following'] = (bool)($video['is_following'] ?? false);
         $video['is_subscribed'] = $video['is_following'];
+        
+        // Ensure notification_pref is not null
+        $video['notification_pref'] = $video['notification_pref'] ?: 'personalized';
+        
         $video = $this->normalizeKeys($video);
 
         $adEngine = new EngineController();
@@ -421,7 +460,7 @@ class VideoController extends BaseController
 
         $videoDbPath = null;
         if ($isFfmpegEnabled) {
-            $tempDir = FCPATH . 'uploads/temp/';
+            $tempDir = ROOTPATH . 'public/uploads/temp/';
             if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
             $newName = time() . '_' . $videoFile->getRandomName();
             if ($videoFile->move($tempDir, $newName)) {
@@ -437,6 +476,8 @@ class VideoController extends BaseController
         $tagsArray = $rawTags ? array_map('trim', explode(',', $rawTags)) : [];
         $uniqueId = 'VID' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 10));
 
+        $isMonetized = ($this->request->getVar('monetization_enabled') === 'true' || $this->request->getVar('monetization_enabled') == 1) ? 1 : 0;
+
         $data = [
             'user_id' => $userId,
             'channel_id' => $channel['id'],
@@ -448,6 +489,7 @@ class VideoController extends BaseController
             'duration' => $this->request->getVar('duration') ?: 0,
             'video_url' => $videoDbPath,
             'thumbnail_url' => ($thumbFile && $thumbFile->isValid()) ? upload_media_master($thumbFile, 'video_thumbnail') : null,
+            'monetization_enabled' => $isMonetized,
             'status' => $isFfmpegEnabled ? 'processing' : 'published',
             'created_at' => date('Y-m-d H:i:s')
         ];
@@ -455,19 +497,20 @@ class VideoController extends BaseController
         if ($this->videoModel->insert($data)) {
             $videoId = $this->videoModel->getInsertID();
 
-            if (!empty($tagsArray)) {
-                $this->hashtagHelper->sync('video', $videoId, $tagsArray);
-            }
-
             if ($isFfmpegEnabled) {
                 $this->db->table('video_processing_queue')->insert([
-                    'video_id' => $videoId,
+                    'video_id'   => $videoId,
                     'channel_id' => $channel['id'],
                     'video_type' => 'video',
                     'input_path' => $videoDbPath,
-                    'status' => 'pending',
-                    'created_at' => date('Y-m-d H:i:s')
+                    'status'     => 'pending',
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
                 ]);
+            }
+
+            if (!empty($tagsArray)) {
+                $this->hashtagHelper->sync('video', $videoId, $tagsArray);
             }
             return $this->respondCreated(['success' => true, 'video_id' => (string)$videoId, 'unique_id' => $uniqueId]);
         }
@@ -496,24 +539,46 @@ class VideoController extends BaseController
     }
 
     /**
-     * ✅ 11. DELETE VIDEO
+     * ✅ 11. DELETE VIDEO (SYNCED WITH USER COUNTER)
      */
     public function delete($id)
     {
         $userId = $this->request->getHeaderLine('User-ID');
         $video = $this->videoModel->where('id', $id)->orWhere('unique_id', $id)->first();
-        if (!$video || $video['user_id'] != $userId) return $this->failForbidden();
-
-        if (!empty($video['video_url']) && file_exists(FCPATH . $video['video_url'])) {
-            @unlink(FCPATH . $video['video_url']);
-        }
-        if (!empty($video['thumbnail_url']) && file_exists(FCPATH . $video['thumbnail_url'])) {
-            @unlink(FCPATH . $video['thumbnail_url']);
+        
+        if (!$video || $video['user_id'] != $userId) {
+            return $this->failForbidden();
         }
 
-        if ($this->videoModel->delete($video['id'])) {
+        try {
+            $this->db->transStart();
+
+            // 1. Files delete karo (Thumbnail & Video)
+            if (!empty($video['video_url']) && file_exists(FCPATH . $video['video_url'])) {
+                @unlink(FCPATH . $video['video_url']);
+            }
+            if (!empty($video['thumbnail_url']) && file_exists(FCPATH . $video['thumbnail_url'])) {
+                @unlink(FCPATH . $video['thumbnail_url']);
+            }
+
+            // 2. Database se video delete karo
+            $this->videoModel->delete($video['id']);
+
+            // 🔥 3. Users table mein videos_count minus karo
+            $this->db->table('users')
+                ->where('id', $userId)
+                ->set('videos_count', 'videos_count - 1', false)
+                ->update();
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                return $this->failServerError('Failed to delete video and sync counter.');
+            }
+
             return $this->respond(['success' => true]);
+        } catch (\Exception $e) {
+            return $this->failServerError($e->getMessage());
         }
-        return $this->failServerError();
     }
 }

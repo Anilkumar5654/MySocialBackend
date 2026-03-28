@@ -15,9 +15,6 @@ class NotificationHelper
         $this->db = Database::connect();
     }
 
-    /**
-     * 🔐 JWT Based Access Token Generator (FCM V1)
-     */
     private function getAccessToken()
     {
         if (!file_exists($this->keyFile)) {
@@ -59,50 +56,46 @@ class NotificationHelper
     }
 
     /**
-     * 🚀 Main Send Function: Database + FCM Trigger
+     * 🚀 Main Send Function: STRICT FILTER & CLEAN TITLES
      */
     public function send($receiverId, $actorId, $type, $notifiableType, $notifiableId, $metadata = [])
     {
-        // Guard: Khud ko notification nahi bhejna
-        if ($receiverId == $actorId) {
-            return false;
-        }
+        if ($receiverId == $actorId) return false;
 
-        // 👤 Actor (Sender) ka naam nikalna
-        $actor = $this->db->table('users')->select('name, username')->where('id', $actorId)->get()->getRow();
-        $actorName = 'Someone';
-        if ($actor) {
-            $actorName = !empty($actor->name) ? $actor->name : $actor->username;
-        }
+        // 🔥 STRICT FILTER: Sirf real activity types allow hain
+        $allowedTypes = ['like', 'comment', 'follow', 'subscribe', 'mention', 'comment_like', 'new_upload'];
+        if (!in_array($type, $allowedTypes)) return false; 
 
-        // ✉️ Message format karna
         $message = $this->getDefaultMessage($type, $notifiableType);
-
-        // 🛡️ Duplicate Prevention (Likes/Follows)
-        if (in_array($type, ['like', 'follow', 'subscribe'])) {
-            $existing = $this->db->table('notifications')
-                ->where([
-                    'user_id'         => $receiverId,
-                    'actor_id'        => $actorId,
-                    'type'            => $type,
-                    'notifiable_id'   => $notifiableId,
-                    'notifiable_type' => $notifiableType,
-                    'is_read'         => 0
-                ])
-                ->get()
-                ->getRow();
-
-            if ($existing) {
-                $this->db->table('notifications')
-                    ->where('id', $existing->id)
-                    ->update(['created_at' => date('Y-m-d H:i:s')]);
-                
-                $this->sendPush($receiverId, $actorName, $type, $message, $metadata);
-                return true;
-            }
+        
+        // Agar metadata mein comment text hai, toh use bhi truncate karo
+        if ($type === 'comment' && !empty($metadata['comment_text'])) {
+            $shortComment = mb_strimwidth($metadata['comment_text'], 0, 40, "...");
+            $message = "Commented: " . $shortComment;
         }
 
-        // 📝 Database Entry
+        $actor = $this->db->table('users')->select('name, username')->where('id', $actorId)->get()->getRow();
+        $actorName = $actor ? (!empty($actor->name) ? $actor->name : $actor->username) : 'Someone';
+
+        $existing = $this->db->table('notifications')
+            ->where([
+                'user_id'         => $receiverId,
+                'actor_id'        => $actorId,
+                'type'            => $type,
+                'notifiable_id'   => $notifiableId,
+                'notifiable_type' => $notifiableType,
+                'is_read'         => 0
+            ])
+            ->get()
+            ->getRow();
+
+        if ($existing) {
+            $this->db->table('notifications')
+                ->where('id', $existing->id)
+                ->update(['created_at' => date('Y-m-d H:i:s')]);
+            return true;
+        }
+
         $inserted = $this->db->table('notifications')->insert([
             'user_id'         => $receiverId,
             'actor_id'        => $actorId,
@@ -116,96 +109,123 @@ class NotificationHelper
         ]);
 
         if ($inserted) {
-            $this->sendPush($receiverId, $actorName, $type, $message, $metadata);
+            $this->sendPush($receiverId, $actorName, $type, $message, $notifiableId, $notifiableType, $metadata);
         }
 
         return $inserted;
     }
 
     /**
-     * 📲 Private function: FCM V1 Payload Logic
+     * 📺 NOTIFY SUBSCRIBERS: Handle "new_upload" duplication & Shorten Title
      */
-    private function sendPush($receiverId, $actorName, $type, $message, $metadata)
+    public function notifySubscribersOnUpload($creatorId, $notifiableId, $notifiableType, $title, $metadata = [])
+    {
+        if ($notifiableType !== 'video') return false;
+
+        $creator = $this->db->table('users')->select('name, username')->where('id', $creatorId)->get()->getRow();
+        if (!$creator) return false;
+        $actorName = !empty($creator->name) ? $creator->name : $creator->username;
+
+        $subscribers = $this->db->table('follows')
+            ->select('follower_id')
+            ->where('following_id', $creatorId)
+            ->whereIn('notification_pref', ['all', 'personalized'])
+            ->get()
+            ->getResultArray();
+
+        if (empty($subscribers)) return false;
+
+        // 🔥 FIX: Shorten Title if it's too long (Max 40 chars)
+        $shortTitle = mb_strimwidth($title, 0, 40, "...");
+        $message = "uploaded : " . $shortTitle;
+        
+        $count = 0;
+
+        foreach ($subscribers as $sub) {
+            $followerId = $sub['follower_id'];
+
+            $exists = $this->db->table('notifications')
+                ->where([
+                    'user_id'       => $followerId,
+                    'type'          => 'new_upload',
+                    'notifiable_id' => $notifiableId,
+                    'is_read'       => 0
+                ])->countAllResults();
+
+            if ($exists > 0) continue; 
+
+            $this->db->table('notifications')->insert([
+                'user_id'         => $followerId,
+                'actor_id'        => $creatorId,
+                'type'            => 'new_upload',
+                'notifiable_type' => $notifiableType,
+                'notifiable_id'   => $notifiableId,
+                'message'         => $message,
+                'metadata'        => !empty($metadata) ? json_encode($metadata) : null,
+                'is_read'         => 0,
+                'created_at'      => date('Y-m-d H:i:s')
+            ]);
+
+            $this->sendPush($followerId, $actorName, 'new_upload', $message, $notifiableId, $notifiableType, $metadata);
+            $count++;
+        }
+        return $count;
+    }
+
+    private function sendPush($receiverId, $actorName, $type, $message, $notifiableId, $notifiableType, $metadata)
     {
         $accessToken = $this->getAccessToken();
         if (!$accessToken) return false;
 
-        $receiver = $this->db->table('users')
-            ->select('fcm_token')
-            ->where('id', $receiverId)
-            ->get()
-            ->getRow();
-
-        if (!$receiver || empty($receiver->fcm_token)) {
-            return false;
-        }
+        $receiver = $this->db->table('users')->select('fcm_token')->where('id', $receiverId)->get()->getRow();
+        if (!$receiver || empty($receiver->fcm_token)) return false;
 
         $url = 'https://fcm.googleapis.com/v1/projects/mysocial-18989/messages:send';
-        
+        $imageUrl = isset($metadata['thumbnail']) ? base_url('uploads/' . $metadata['thumbnail']) : null;
+
         $payload = [
             'message' => [
                 'token' => $receiver->fcm_token,
-                
-                // 🔔 NATIVE NOTIFICATION: Android System Tray ke liye
                 'notification' => [
-                    'title' => $actorName,
-                    'body'  => $message
+                    'title' => (string)$actorName,
+                    'body'  => (string)$message,
+                    'image' => $imageUrl
                 ],
-
                 'android' => [
                     'priority' => 'high',
-                    'notification' => [
-                        'sound' => 'default',
-                        // 🔥 FIXED: Mapped to 'messages' channel for status bar consistency
-                        'channel_id' => 'messages' 
-                    ]
+                    'notification' => ['sound' => 'default', 'channel_id' => 'messages']
                 ],
-
-                // ⚙️ DATA PAYLOAD: React Native (Frontend) ke logic ke liye
                 'data' => [
-                    'sender'   => 'mysocial_backend', 
-                    'type'     => (string)$type,       
-                    'title'    => (string)$actorName,  
-                    'body'     => (string)$message,    
-                    'author'   => (string)$actorName,  
-                    'metadata' => is_array($metadata) ? json_encode($metadata) : (string)$metadata
+                    'type'            => (string)$type,       
+                    'notifiable_id'   => (string)$notifiableId,
+                    'notifiable_type' => (string)$notifiableType,
                 ]
             ]
-        ];
-
-        $headers = [
-            'Authorization: Bearer ' . $accessToken,
-            'Content-Type: application/json'
         ];
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $accessToken, 'Content-Type: application/json']);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        
-        $response = curl_exec($ch);
+        curl_exec($ch);
         curl_close($ch);
-
-        return $response;
     }
 
-    /**
-     * 📝 Helper: Default Message Text
-     */
     private function getDefaultMessage($type, $entity)
     {
         $messages = [
-            'like'      => "liked your $entity",
-            'comment'   => "commented on your $entity",
-            'follow'    => "started following you",
-            'subscribe' => "subscribed to your channel",
-            'mention'   => "mentioned you in a $entity",
+            'like'         => "Liked",
+            'comment'      => "Commented:",
+            'follow'       => "Followed you",
+            'subscribe'    => "Subscribed",
+            'mention'      => "Mentioned you",
+            'comment_like' => "Liked your comment",
+            'new_upload'   => "uploaded : "
         ];
-
-        return $messages[$type] ?? "interacted with your content";
+        
+        // Agar type inme se nahi hai, toh false return karega send function mein
+        return $messages[$type] ?? null; 
     }
 }
-

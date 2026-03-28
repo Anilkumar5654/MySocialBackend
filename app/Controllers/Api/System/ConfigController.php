@@ -18,13 +18,15 @@ class ConfigController extends ResourceController
 
     /**
      * ⚙️ GET /api/system/config
-     * Sirf global upload limits aur maintenance status return karega.
+     * Global settings, Branding aur API Keys return karega.
      */
     public function index()
     {
-        // 1. Database se sirf global settings uthao
+        // 1. Database se zaroori settings uthao (Including Google Key & App Name)
         $builder = $this->db->table('system_settings');
         $builder->whereIn('setting_key', [
+            'app_name',                    // 👈 Added
+            'google_places_api_key',       // 👈 Added
             'max_upload_size_mb',
             'allowed_video_formats',
             'reel_max_size_mb',
@@ -39,11 +41,17 @@ class ConfigController extends ResourceController
             $settings[$row['setting_key']] = $row['setting_value'];
         }
 
-        // 2. Structured Response (No User Permissions Here)
+        // 2. Structured Response
         $response = [
             'status' => true,
             'message' => 'System configuration loaded',
             
+            // Frontend use karega globally
+            'config' => [
+                'app_name' => $settings['app_name'] ?? 'MySocial',
+                'google_places_api_key' => $settings['google_places_api_key'] ?? '', 
+            ],
+
             'upload_config' => [
                 'max_size_video_mb' => (int)($settings['max_upload_size_mb'] ?? 500),
                 'max_size_reel_mb'  => (int)($settings['reel_max_size_mb'] ?? 50),
@@ -53,6 +61,7 @@ class ConfigController extends ResourceController
             ],
 
             'system_info' => [
+                'app_name'         => $settings['app_name'] ?? 'MySocial',
                 'maintenance_mode' => false, 
                 'force_update'     => false,
                 'min_app_version'  => '1.0.0'
@@ -62,4 +71,3 @@ class ConfigController extends ResourceController
         return $this->respond($response);
     }
 }
-

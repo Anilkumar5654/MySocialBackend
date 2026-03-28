@@ -10,128 +10,241 @@ if (!function_exists('format_number_k')) {
         return $number;
     }
 }
+
+// Logic for stats cards
+$totalUsers = count($users);
+$activeUsers = 0;
+$bannedUsers = 0;
+foreach($users as $u) {
+    if(!$u->is_banned) $activeUsers++;
+    if($u->is_banned) $bannedUsers++;
+}
 ?>
 
 <style>
-    /* ⚡ Global Variables ko follow karne ke liye pro styles */
-    .form-control-pro { 
-        background: #fff !important; border: 1px solid var(--border-soft) !important; 
-        color: var(--text-dark) !important; height: 45px; border-radius: 8px; 
-    }
-    .user-avatar { 
-        width: 45px; height: 45px; border-radius: 10px; border: 1px solid var(--border-soft); object-fit: cover; 
-    }
-    .status-badge { 
-        font-size: 9px; padding: 4px 10px; border-radius: 4px; font-weight: 700; 
-        text-transform: uppercase; display: inline-block; 
-    }
-    .badge-kyc-approved { 
-        background: rgba(10, 187, 135, 0.1); color: var(--accent-green); border: 1px solid var(--accent-green); 
-    }
-    .stat-pill { 
-        background: #f8f9fa; border: 1px solid var(--border-soft); padding: 3px 10px; 
-        border-radius: 6px; font-size: 11px; color: var(--text-dark); display: flex; 
-        align-items: center; gap: 6px; margin-bottom: 4px; font-weight: 500;
+    /* 🎨 PAGE SPECIFIC LAYOUT (Powered completely by Global Variables) */
+    .dashboard-container { padding: var(--space-lg); }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: var(--space-md);
+        margin-bottom: var(--space-lg);
     }
 
+    /* Modifiers for Stats Cards */
+    .stat-card {
+        padding: var(--space-lg);
+        border-left-width: 4px;
+        border-left-style: solid;
+    }
+    .border-left-primary { border-left-color: var(--primary-blue); }
+    .border-left-success { border-left-color: var(--accent-green); }
+    .border-left-warning { border-left-color: var(--accent-orange); } /* Fallback to orange if warning is missing */
+    .border-left-dark { border-left-color: var(--text-dark); }
+
+    .stat-value {
+        color: var(--text-dark);
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-black);
+    }
+
+    /* Filter & Form Elements */
+    .input-group-text-pro {
+        background-color: transparent;
+        border: 1px solid var(--border-soft);
+        border-right: none;
+        border-top-left-radius: var(--radius-md);
+        border-bottom-left-radius: var(--radius-md);
+        color: var(--text-muted);
+    }
+
+    .form-control-pro { 
+        background-color: transparent; 
+        border: 1px solid var(--border-soft); 
+        color: var(--text-dark); 
+        height: var(--btn-height-action); 
+        font-size: var(--font-size-md);
+    }
+    
+    .input-group .form-control-pro {
+        border-left: none;
+        border-top-right-radius: var(--radius-md);
+        border-bottom-right-radius: var(--radius-md);
+    }
+    
+    select.form-control-pro {
+        border-radius: var(--radius-md);
+    }
+
+    /* Custom Table Styling */
+    .premium-table thead th {
+        background-color: var(--bg-light);
+        border-bottom: 1px solid var(--border-soft);
+        color: var(--text-dark);
+        font-size: var(--font-size-xs);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: var(--font-weight-bold);
+        padding: var(--space-md);
+    }
+
+    .premium-table tbody tr td {
+        padding: var(--space-md);
+        vertical-align: middle;
+        border-bottom: 1px solid var(--border-soft);
+    }
+
+    /* Mobile Adjustments */
     @media (max-width: 768px) {
-        .table-responsive { border: 0; }
-        .user-avatar { width: 35px; height: 35px; }
+        .dashboard-container { padding: var(--space-sm); }
+        .stats-grid { grid-template-columns: 1fr 1fr; }
     }
 </style>
 
 <div class="content-header">
-    <div class="container-fluid">
-        <h1 style="color: var(--text-dark); font-weight: 700; letter-spacing: -0.5px;">
-            <i class="fas fa-database mr-2 text-primary"></i> All Users
+    <div class="container-fluid d-flex justify-content-between align-items-center">
+        <h1 class="page-title">
+            User Directory
         </h1>
+        <div class="header-actions">
+            <button class="btn btn-light btn-sm mr-2">
+                <i class="fas fa-download mr-1"></i> Export
+            </button>
+            <button class="btn btn-primary">
+                <i class="fas fa-plus mr-1"></i> Add User
+            </button>
+        </div>
     </div>
 </div>
 
-<section class="content">
+<section class="content dashboard-container">
     <div class="container-fluid">
-        <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px;">
-            <div class="card-body">
-                <form action="<?= base_url('admin/users') ?>" method="get">
-                    <div class="row">
-                        <div class="col-12 col-md-5 mb-2">
-                            <label class="small text-muted font-weight-bold">SEARCH ENTITY</label>
-                            <input type="text" name="search" class="form-control form-control-pro" placeholder="UID / Name / Username" value="<?= $_GET['search'] ?? '' ?>">
-                        </div>
-                        <div class="col-6 col-md-3 mb-2">
-                            <label class="small text-muted font-weight-bold">ACCOUNT STATUS</label>
-                            <select name="status" class="form-control form-control-pro">
-                                <option value="">ALL</option>
-                                <option value="active" <?= ($_GET['status'] ?? '') == 'active' ? 'selected' : '' ?>>ACTIVE</option>
-                                <option value="banned" <?= ($_GET['status'] ?? '') == 'banned' ? 'selected' : '' ?>>BANNED</option>
-                            </select>
-                        </div>
-                        <div class="col-6 col-md-4 d-flex align-items-end mb-2">
-                            <button type="submit" class="btn btn-primary font-weight-bold w-100 shadow-sm" style="background: var(--primary-blue); height: 45px; border-radius: 8px; border: none;">
-                                <i class="fas fa-sync-alt mr-1"></i> Search
-                            </button>
-                        </div>
-                    </div>
-                </form>
+        
+        <div class="stats-grid">
+            <div class="card stat-card border-left-primary mb-0">
+                <div class="label">Total Users</div>
+                <div class="stat-value"><?= number_format($totalUsers) ?></div>
+            </div>
+            <div class="card stat-card border-left-success mb-0">
+                <div class="label">Active Users</div>
+                <div class="stat-value"><?= number_format($activeUsers) ?></div>
+            </div>
+            <div class="card stat-card border-left-warning mb-0">
+                <div class="label">Banned</div>
+                <div class="stat-value"><?= number_format($bannedUsers) ?></div>
+            </div>
+            <div class="card stat-card border-left-dark mb-0">
+                <div class="label">Growth</div>
+                <div class="stat-value">+12%</div>
             </div>
         </div>
 
-        <div class="card shadow-sm border-0" style="border-radius: 12px; overflow: hidden;">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead style="background: #f8f9fa; color: var(--text-dark); font-size: 11px; text-transform: uppercase;">
-                            <tr>
-                                <th class="py-3 px-4 border-0">System ID</th>
-                                <th class="py-3 border-0">Profile Info</th>
-                                <th class="py-3 border-0">Stats</th>
-                                <th class="py-3 text-center border-0">Verification</th>
-                                <th class="py-3 text-right px-4 border-0">Action Map</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach($users as $user): ?>
-                            <tr style="border-bottom: 1px solid var(--border-soft);">
-                                <td class="align-middle px-4">
-                                    <span class="text-dark font-weight-bold">#<?= $user->id ?></span>
-                                    <small class="d-block text-primary font-weight-bold" style="font-size: 10px; font-family: monospace;"><?= $user->unique_id ?: 'NO_UID' ?></small>
-                                </td>
-                                <td class="align-middle">
-                                    <div class="d-flex align-items-center">
-                                        <img src="<?= get_media_url($user->avatar, 'profile') ?>" 
-                                             onerror="this.src='https://ui-avatars.com/api/?name=<?= $user->username ?>&background=f4f7fa&color=5d78ff';" 
-                                             class="user-avatar mr-3">
-                                        <div>
-                                            <div class="text-dark font-weight-bold" style="font-size: 14px; line-height: 1.2;">
-                                                <?= $user->name ?: 'Member' ?>
-                                                <?php if($user->is_verified): ?><i class="fas fa-check-circle text-primary ml-1" style="font-size: 11px;"></i><?php endif; ?>
-                                            </div>
-                                            <small class="text-muted">@<?= strtoupper($user->username) ?></small>
+        <div class="card p-4">
+            <form action="<?= base_url('admin/users') ?>" method="get">
+                <div class="row align-items-end">
+                    <div class="col-12 col-md-5">
+                        <label class="label mb-2">SEARCH DIRECTORY</label>
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text-pro px-3 d-flex align-items-center"><i class="fas fa-search"></i></span>
+                            </div>
+                            <input type="text" name="search" class="form-control form-control-pro" placeholder="UID, Name or Username..." value="<?= $_GET['search'] ?? '' ?>">
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <label class="label mb-2">ACCOUNT STATUS</label>
+                        <select name="status" class="form-control form-control-pro">
+                            <option value="">Show All Status</option>
+                            <option value="active" <?= ($_GET['status'] ?? '') == 'active' ? 'selected' : '' ?>>Active Only</option>
+                            <option value="banned" <?= ($_GET['status'] ?? '') == 'banned' ? 'selected' : '' ?>>Banned Only</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="submit" class="btn btn-primary w-100" style="height: var(--btn-height-action);">
+                            <i class="fas fa-filter mr-1"></i> Apply Filters
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table premium-table mb-0">
+                    <thead>
+                        <tr>
+                            <th class="pl-4">System ID</th>
+                            <th>Identity & Profile</th>
+                            <th>Engagement</th>
+                            <th class="text-center">Account Status</th>
+                            <th class="text-right pr-4">Management</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach($users as $user): ?>
+                        <tr>
+                            <td class="pl-4">
+                                <div class="text-strong">#<?= $user->id ?></div>
+                                <div class="label text-primary mt-1"><?= $user->unique_id ?: 'UNSET' ?></div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <img src="<?= get_media_url($user->avatar, 'profile') ?>" 
+                                         onerror="this.src='https://ui-avatars.com/api/?name=<?= $user->username ?>&background=f4f7fa&color=5d78ff';" 
+                                         class="avatar-sm mr-3">
+                                    <div>
+                                        <div class="text-strong text-md">
+                                            <?= $user->name ?: 'Standard Member' ?>
+                                            <?php if($user->is_verified): ?><i class="fas fa-check-circle text-primary ml-1 font-size-xs"></i><?php endif; ?>
                                         </div>
+                                        <div class="label mt-1">@<?= strtoupper($user->username) ?></div>
                                     </div>
-                                </td>
-                                <td class="align-middle">
-                                    <div style="min-width: 130px;">
-                                        <span class="stat-pill"><i class="fas fa-users text-primary"></i> <?= format_number_k($user->followers_count) ?></span>
-                                        <span class="stat-pill"><i class="fas fa-video text-info"></i> <?= format_number_k($user->videos_count + $user->reels_count) ?></span>
-                                    </div>
-                                </td>
-                                <td class="align-middle text-center">
-                                    <span class="status-badge <?= $user->is_banned ? 'badge-danger' : 'badge-success' ?> mb-1">
-                                        <?= $user->is_banned ? 'BANNED' : 'ACTIVE' ?>
-                                    </span>
-                                    <br>
-                                    <?php if($user->kyc_status == 'APPROVED'): ?>
-                                        <span class="status-badge badge-kyc-approved">Kyc Done</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="align-middle text-right px-4">
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <span class="badge badge-neutral"><i class="fas fa-users text-primary mr-1"></i> <?= format_number_k($user->followers_count) ?></span>
+                                    <span class="badge badge-neutral"><i class="fas fa-play-circle text-info mr-1"></i> <?= format_number_k($user->videos_count + $user->reels_count) ?></span>
+                                </div>
+                            </td>
+                            <td class="text-center">
+                                <span class="badge <?= $user->is_banned ? 'badge-danger' : 'badge-success' ?>">
+                                    <?= $user->is_banned ? 'Banned' : 'Active' ?>
+                                </span>
+                                <?php if($user->kyc_status == 'APPROVED'): ?>
+                                    <div class="mt-2"><span class="badge badge-success">KYC Verified</span></div>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-right pr-4">
+                                <div class="d-inline-flex">
                                     <?= view('admin/common/action_buttons', ['id' => $user->id, 'type' => 'users', 'row' => $user]) ?>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                        
+                        <?php if(empty($users)): ?>
+                            <tr>
+                                <td colspan="5" class="text-center py-5">
+                                    <div class="text-muted font-weight-bold">No users found in the system.</div>
                                 </td>
                             </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="px-4 py-3 d-flex justify-content-between align-items-center border-top">
+                <div class="label mb-0">
+                    Showing <?= count($users) ?> results
+                </div>
+                <div class="pagination-ui">
+                    <ul class="pagination pagination-sm m-0">
+                        <li class="page-item disabled"><a class="page-link" href="#">Previous</a></li>
+                        <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                        <li class="page-item"><a class="page-link" href="#">Next</a></li>
+                    </ul>
                 </div>
             </div>
         </div>

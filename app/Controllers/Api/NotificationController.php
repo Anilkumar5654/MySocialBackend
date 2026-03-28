@@ -139,5 +139,36 @@ class NotificationController extends BaseController
             'count'   => $this->getUnreadCount($currentUserId)
         ]);
     }
-}
 
+    /**
+     * ✅ 4. GET PENDING FOLLOW REQUESTS
+     * Fetch users who sent follow requests but are still 'pending'
+     */
+    public function getFollowRequests()
+    {
+        $currentUserId = $this->request->getHeaderLine('User-ID');
+        if (!$currentUserId) return $this->failUnauthorized('User-ID missing');
+
+        // 🔥 Logic: 'follows' table se wo users uthao jinhone is user ko follow kiya hai
+        // status strictly 'pending' hona chahiye
+        $builder = $this->db->table('follows f');
+        $builder->select('u.id, u.username, u.name, u.avatar');
+        $builder->join('users u', 'u.id = f.follower_id');
+        $builder->where('f.following_id', $currentUserId);
+        $builder->where('f.status', 'pending');
+        $builder->orderBy('f.created_at', 'DESC');
+
+        $requests = $builder->get()->getResultArray();
+
+        // Avatar URLs generate karna
+        foreach ($requests as &$req) {
+            $req['id']     = (string)$req['id'];
+            $req['avatar'] = get_media_url($req['avatar']);
+        }
+
+        return $this->respond([
+            'success'  => true,
+            'requests' => $requests
+        ]);
+    }
+}

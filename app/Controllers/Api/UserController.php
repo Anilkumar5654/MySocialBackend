@@ -18,7 +18,8 @@ class UserController extends BaseController {
         $this->postModel = new PostModel();
         $this->channelModel = new ChannelModel();
         $this->db = \Config\Database::connect();
-        helper(['media', 'url', 'date', 'filesystem', 'text']);
+        // 🔥 Helper loaded for location hierarchy
+        helper(['media', 'url', 'date', 'filesystem', 'text', 'location']);
     }
 
     /**
@@ -45,20 +46,22 @@ class UserController extends BaseController {
     }
 
     /**
-     * ✅ 2. FETCH PROFILE (User 61 Fix)
+     * ✅ 2. FETCH PROFILE
      */
     public function fetchProfile() {
         $targetUserId = $this->request->getGet('user_id') ?? $this->request->getVar('user_id');
         $currentUserId = $this->request->getHeaderLine('User-ID');
         if (!$targetUserId) return $this->fail('User ID missing', 400);
+        
         $profile = $this->userModel->getProfile((int)$targetUserId, (int)$currentUserId);
         if (!$profile) return $this->failNotFound('User not found');
+        
         $channel = $this->db->table('channels')
             ->select('id, name, strikes_count, can_report, is_monetization_enabled, monetization_status')
             ->where('user_id', $targetUserId)
             ->get()
             ->getRowArray();
-        // 🔥 FIXED: Safety check for users without channel entries (User 61)
+
         $profile['channel_id'] = $channel ? $channel['id'] : null;
         $profile['channel_name'] = $channel ? $channel['name'] : null;
         $profile['is_monetization_enabled'] = $channel ? (int)$channel['is_monetization_enabled'] : 0;
@@ -67,6 +70,12 @@ class UserController extends BaseController {
         $profile['display_name'] = $profile['channel_name'] ?: ($profile['name'] ?: $profile['username']);
         $profile['status'] = $this->calculateStatus($profile['last_active']);
         $profile['can_message'] = $this->checkMutualInteraction($currentUserId, $targetUserId);
+        
+        $pCount = (int)($profile['posts_count'] ?? 0);
+        $vCount = (int)($profile['videos_count'] ?? 0);
+        $rCount = (int)($profile['reels_count'] ?? 0);
+        $profile['total_content'] = $pCount + $vCount + $rCount;
+
         $user_permissions = ['upload_blocked' => false, 'claim_blocked' => false, 'block_message' => ""];
         if ($channel) {
             $user_permissions['claim_blocked'] = ((int)$channel['can_report'] === 0);
@@ -84,6 +93,21 @@ class UserController extends BaseController {
         }
         $profile['channel_permissions'] = $user_permissions;
         return $this->respond(['success' => true, 'user' => $this->normalizeKeys($profile)]);
+    }
+
+    /**
+     * ✅ 2.5 SEARCH LOCATIONS
+     */
+    public function searchLocations() {
+        $type = $this->request->getGet('type');      
+        $query = $this->request->getGet('query') ?? ''; 
+        $context = $this->request->getGet('context') ?? ''; 
+
+        if (!$type) return $this->respond([]);
+
+        $results = search_static_locations($type, $query, $context);
+        
+        return $this->respond($results);
     }
 
     /**
@@ -111,28 +135,59 @@ class UserController extends BaseController {
     }
 
     /**
-     * ✅ 4. TOGGLE FOLLOW
+     * ✅ 4. TOGGLE FOLLOW (🔥 100% FIXED MUTUAL & FOLLOW BACK LOGIC)
      */
     public function toggleFollow() {
         $currentUserId = $this->request->getHeaderLine('User-ID');
-        $targetUserId = $this->request->getPost('user_id');
-        if (!$currentUserId || !$targetUserId || $currentUserId == $targetUserId) return $this->fail('Invalid Request', 400);
+        
+        // 🔥 FIX 1: Robust Input Capture (Handles both JSON and Form-Data from React Native)
+        $json = $this->request->getJSON(true) ?: [];
+        $targetUserId = $json['user_id'] ?? $this->request->getPost('user_id') ?? $this->request->getVar('user_id');
+        
+        if (!$currentUserId || !$targetUserId || $currentUserId == $targetUserId) {
+            return $this->fail('Invalid Request', 400);
+        }
+        
         $followData = ['follower_id' => $currentUserId, 'following_id' => $targetUserId];
+        
         $this->db->transStart();
         $existing = $this->db->table('follows')->where($followData)->get()->getRow();
         $isFollowing = false;
+        
         if ($existing) {
+            // Unfollow Logic
             $this->db->table('follows')->where($followData)->delete();
             $this->db->table('users')->where('id', $currentUserId)->decrement('following_count');
             $this->db->table('users')->where('id', $targetUserId)->decrement('followers_count');
         } else {
+            // Follow Logic
             $this->db->table('follows')->insert($followData);
             $this->db->table('users')->where('id', $currentUserId)->increment('following_count');
             $this->db->table('users')->where('id', $targetUserId)->increment('followers_count');
             $isFollowing = true;
         }
         $this->db->transComplete();
-        return ($this->db->transStatus() === FALSE) ? $this->failServerError('Transaction failed.') : $this->respond(['success' => true, 'following' => $isFollowing]);
+
+        if ($this->db->transStatus() === FALSE) {
+            return $this->failServerError('Transaction failed.');
+        }
+
+        // 🔥 FIX 2: Check Mutual Status (Is the target person following the current user?)
+        $isFollowedByViewer = $this->db->table('follows')
+            ->where(['follower_id' => $targetUserId, 'following_id' => $currentUserId])
+            ->countAllResults() > 0;
+            
+        // 🔥 FIX 3: Calculate 'can_message' (Do both follow each other?)
+        $canMessage = ($isFollowing && $isFollowedByViewer);
+
+        // Return COMPLETE STATE to the frontend so UI updates instantly
+        return $this->respond([
+            'success'               => true, 
+            'is_following'          => $isFollowing,          // React Native mostly uses this
+            'following'             => $isFollowing,          // Backward compatibility
+            'is_followed_by_viewer' => $isFollowedByViewer,   // "Follow Back" UI check
+            'can_message'           => $canMessage            // Enable message button instantly
+        ]);
     }
 
     /**
@@ -143,13 +198,17 @@ class UserController extends BaseController {
         $currentUserId = (int)$this->request->getHeaderLine('User-ID');
         $page = (int)($this->request->getGet('page') ?? 1);
         $limit = 20; $offset = ($page - 1) * $limit;
+        
         $builder = $this->db->table('follows f');
         $builder->select('u.id, u.username, u.name, u.avatar, u.is_verified, c.name as channel_name');
         $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = $currentUserId AND following_id = u.id) as is_following");
         $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = u.id AND following_id = $currentUserId) as is_followed_by_viewer");
-        $builder->join('users u', 'f.follower_id = u.id')->join('channels c', 'c.user_id = u.id', 'left');
+        $builder->join('users u', 'f.follower_id = u.id');
+        $builder->join('channels c', 'c.user_id = u.id', 'left');
         $builder->where(['f.following_id' => $targetUserId, 'u.is_deleted' => 0]);
+        
         $users = $builder->get($limit, $offset)->getResultArray();
+        
         foreach ($users as &$u) {
             $u['display_name'] = $u['channel_name'] ?: ($u['name'] ?: $u['username']);
             $u['is_following'] = (int)$u['is_following'] > 0;
@@ -167,14 +226,17 @@ class UserController extends BaseController {
         $currentUserId = (int)$this->request->getHeaderLine('User-ID');
         $page = (int)($this->request->getGet('page') ?? 1);
         $limit = 20; $offset = ($page - 1) * $limit;
+        
         $builder = $this->db->table('follows f');
         $builder->select('u.id, u.username, u.name, u.avatar, u.is_verified, c.name as channel_name');
         $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = $currentUserId AND following_id = u.id) as is_following");
         $builder->select("(SELECT COUNT(*) FROM follows WHERE follower_id = u.id AND following_id = $currentUserId) as is_followed_by_viewer");
-        $builder->join('users u', 'f.following_id = u.id')->join('channels c', 'c.user_id = u.id', 'left');
+        $builder->join('users u', 'f.following_id = u.id');
+        $builder->join('channels c', 'c.user_id = u.id', 'left');
         $builder->where(['f.follower_id' => $targetUserId, 'u.is_deleted' => 0]);
+        
         $users = $builder->get($limit, $offset)->getResultArray();
-        // 🔥 FIXED: Variable mismatch fixed from conversations to users
+        
         foreach ($users as &$u) {
             $u['display_name'] = $u['channel_name'] ?: ($u['name'] ?: $u['username']);
             $u['is_following'] = (int)$u['is_following'] > 0;
@@ -255,7 +317,7 @@ class UserController extends BaseController {
     }
 
     /**
-     * ✅ 12. EDIT PROFILE (Fixed with Cover Photo & Data Sync)
+     * ✅ 12. EDIT PROFILE
      */
     public function editProfile() {
         $userId = $this->request->getHeaderLine('User-ID');
@@ -265,12 +327,19 @@ class UserController extends BaseController {
         $data = $this->request->getPost();
         
         $updateData = [];
-        // Normal fields mapping
-        foreach (['name', 'username', 'bio', 'website', 'location', 'phone'] as $f) {
-            if (isset($data[$f])) $updateData[$f] = trim($data[$f]);
+
+        $fields = [
+            'name', 'username', 'bio', 'location', 'phone', 
+            'dob', 'gender', 'district', 'state', 'country'
+        ];
+
+        foreach ($fields as $f) {
+            if (isset($data[$f])) {
+                $val = trim($data[$f]);
+                $updateData[$f] = ($val === '') ? null : $val;
+            }
         }
 
-        // Handle Profile Image (Key: 'profile')
         $avatarFile = $this->request->getFile('profile');
         if ($avatarFile && $avatarFile->isValid() && !$avatarFile->hasMoved()) {
             $avatarPath = upload_media_master($avatarFile, 'profile');
@@ -280,7 +349,6 @@ class UserController extends BaseController {
             }
         }
 
-        // Handle Cover Photo (Key: 'cover')
         $coverFile = $this->request->getFile('cover');
         if ($coverFile && $coverFile->isValid() && !$coverFile->hasMoved()) {
             $coverPath = upload_media_master($coverFile, 'cover');
@@ -292,13 +360,16 @@ class UserController extends BaseController {
 
         if (!empty($updateData)) {
             $this->userModel->update($userId, $updateData);
+            if (isset($updateData['name'])) {
+                $this->db->table('channels')->where('user_id', $userId)->update(['name' => $updateData['name']]);
+            }
         }
 
-        // Fetch updated user to return to frontend
-        $updatedUser = $this->userModel->find($userId);
+        $updatedUser = $this->userModel->getProfile((int)$userId); 
         return $this->respond([
             'success' => true, 
-            'user' => $this->normalizeKeys($updatedUser)
+            'user' => $this->normalizeKeys($updatedUser),
+            'message' => 'Profile updated successfully'
         ]);
     }
 
@@ -324,7 +395,6 @@ class UserController extends BaseController {
      */
     public function search() {
         $query = $this->request->getGet('q');
-        $currentUserId = (int)$this->request->getHeaderLine('User-ID');
         if (empty($query)) return $this->respond(['results' => ['users' => []]]);
         $users = $this->db->table('users u')->select('u.id, u.username, u.name, u.avatar, u.is_verified, u.last_active, c.name as channel_name') ->join('channels c', 'c.user_id = u.id', 'left')->groupStart()->like('u.username', $query)->orLike('u.name', $query)->groupEnd() ->where('u.is_deleted', 0)->limit(20)->get()->getResultArray();
         foreach ($users as &$u) {
@@ -363,7 +433,7 @@ class UserController extends BaseController {
     }
 
     /**
-     * ✅ 17. DELETE ACCOUNT / CONTENT
+     * ✅ 17. DELETE ACCOUNT
      */
     public function delete() {
         $uid = $this->request->getHeaderLine('User-ID');
@@ -377,6 +447,68 @@ class UserController extends BaseController {
     }
 
     /**
+     * ✅ 18. GET CREATOR FINANCES (Earnings, Payouts, Pending)
+     * Planning: Calculate totals from earnings and withdrawals tables based on status and date range.
+     */
+    public function getCreatorFinances() {
+        $userId = $this->request->getHeaderLine('User-ID');
+        if (!$userId) return $this->failUnauthorized();
+
+        // Date Range logic (Default to last 30 days if not provided)
+        $startDate = $this->request->getGet('start_date') ?: date('Y-m-d', strtotime('-30 days'));
+        $endDate   = $this->request->getGet('end_date') ?: date('Y-m-d');
+
+        // 1. Total Earnings (Sum of all approved/paid earnings in range)
+        $totalEarnings = $this->db->table('creator_earnings')
+            ->where('user_id', $userId)
+            ->whereIn('status', ['approved', 'paid'])
+            ->where("created_at BETWEEN '$startDate 00:00:00' AND '$endDate 23:59:59'")
+            ->selectSum('amount')
+            ->get()->getRow()->amount ?? 0;
+
+        // 2. Total Payouts (Sum of completed withdrawals)
+        $totalPayouts = $this->db->table('withdrawals')
+            ->where(['user_id' => $userId, 'status' => 'completed'])
+            ->selectSum('amount')
+            ->get()->getRow()->amount ?? 0;
+
+        // 3. Pending Balance (Sum of pending earnings)
+        $pendingAmount = $this->db->table('creator_earnings')
+            ->where(['user_id' => $userId, 'status' => 'pending'])
+            ->selectSum('amount')
+            ->get()->getRow()->amount ?? 0;
+
+        // 4. Current Wallet Balances
+        $creatorWallet = $this->db->table('creator_wallets')->where('user_id', $userId)->get()->getRow();
+        $spendingWallet = $this->db->table('spending_wallets')->where('user_id', $userId)->get()->getRow();
+
+        // 5. Last Transactions (5 records)
+        $transactions = $this->db->table('wallet_transactions')
+            ->where('user_id', $userId)
+            ->orderBy('created_at', 'DESC')
+            ->limit(5)
+            ->get()->getResultArray();
+
+        foreach ($transactions as &$tx) {
+            $tx = $this->normalizeKeys($tx);
+        }
+
+        return $this->respond([
+            'success' => true,
+            'stats' => [
+                'total_earnings'  => (float)$totalEarnings,
+                'total_payouts'   => (float)$totalPayouts,
+                'pending_amount'  => (float)$pendingAmount,
+                'creator_balance' => (float)($creatorWallet->balance ?? 0),
+                'spending_balance'=> (float)($spendingWallet->balance ?? 0),
+                'currency'        => $creatorWallet->currency ?? 'USD',
+                'period'          => ['start' => $startDate, 'end' => $endDate]
+            ],
+            'last_transactions' => $transactions
+        ]);
+    }
+
+    /**
      * 🛠️ HELPERS
      */
     private function formatPostMedia($posts) {
@@ -387,32 +519,13 @@ class UserController extends BaseController {
         return $posts;
     }
 
-    /**
-     * 🔥 FIXED: Last Seen Logic
-     * Logic: Online -> m ago -> h ago -> Yesterday -> Date
-     */
     private function calculateStatus($ts) {
         if (!$ts) return "Offline";
         $lastActive = strtotime($ts);
         $diff = time() - $lastActive;
-        
-        // 1. Online (65 seconds)
         if ($diff <= 65) return "Online";
-        
-        // 2. Minutes (Up to 1 hour)
         if ($diff < 3600) return round($diff / 60) . "m ago";
-        
-        // 3. Hours (Up to 24 hours)
         if ($diff < 86400) return round($diff / 3600) . "h ago";
-        
-        // 4. Yesterday
-        $today = strtotime('today');
-        $yesterday = strtotime('yesterday');
-        if ($lastActive >= $yesterday && $lastActive < $today) {
-            return "Yesterday";
-        }
-        
-        // 5. Date
         return date("d M", $lastActive);
     }
 

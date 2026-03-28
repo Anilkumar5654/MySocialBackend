@@ -4,44 +4,22 @@ namespace App\Controllers\Api;
 
 use App\Controllers\BaseController;
 use CodeIgniter\API\ResponseTrait;
+use App\Helpers\StreamHelper; // 🔥 Added StreamHelper
 
 class StreamController extends BaseController
 {
     use ResponseTrait;
 
     /**
-     * 🔥 UPGRADED JWT GENERATOR: Bina kisi logic ko touch kiye.
-     * Fixed: Added video and call permissions for stable socket connection.
-     * Fix added: Strict whitespace removal to prevent compact serialization errors.
+     * 🔥 UPDATED: generateManualToken now uses StreamHelper
+     * Isse poore app mein same stable JWT signature rahega.
      */
     private function generateManualToken($uid) {
-        $apiKey = 'hd2hh25znvez'; 
-        $apiSecret = '55863qe5x7p5zzam7qa4guqctcug2ny7rnzhk6kg4cdqr2uqcw35mwaxye22wnb8'; 
-
-        $header = json_encode(['alg' => 'HS256', 'typ' => 'JWT']);
-        $payload = json_encode([
-            'user_id' => (string)$uid,
-            'iat' => time(),
-            // Video calls ke liye exp claim dalna professional rehta hai
-            'exp' => time() + (3600 * 24), // 24 Hours validity
-            'video' => true,               // 🔥 FIX: Required for Video Socket
-            'call'  => '*'                 // 🔥 FIX: Required for Room Access
-        ]);
-
-        $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-
-        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, $apiSecret, true);
-        $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-
-        // 🔥 FINAL FIX: String concatenate karke kisi bhi tarah ka whitespace ya newline remove karna
-        // Isse jwt.io ka serialization error aur 1006 connection abort fix ho jayega
-        $token = $base64UrlHeader . "." . $base64UrlPayload . "." . $base64UrlSignature;
-        return preg_replace('/\s+/', '', trim($token)); 
+        return StreamHelper::generateToken((string)$uid);
     }
 
     /**
-     * ✅ EXISTING LOGIC: Get Token for Chat/Video
+     * ✅ EXISTING LOGIC: Get Token for Chat
      */
     public function getToken()
     {
@@ -55,7 +33,7 @@ class StreamController extends BaseController
         return $this->respond([
             'success' => true,
             'token'   => $token,
-            'apiKey'  => 'hd2hh25znvez'
+            'apiKey'  => StreamHelper::getApiKey() // ✅ API Key helper se li gayi hai
         ]);
     }
 
@@ -76,9 +54,9 @@ class StreamController extends BaseController
         // 2. Generate unique snake_case call ID
         $call_id = 'call_' . $uid . '_' . bin2hex(random_bytes(4));
 
-        // 3. Generate Token
+        // 3. Generate Token via Helper
         $token = $this->generateManualToken($uid);
-        $api_key = 'hd2hh25znvez';
+        $api_key = StreamHelper::getApiKey();
 
         // 4. Create Web-Join Link (Bina SDK install kiye calls chalane ke liye)
         // Ye link aap WebView mein load karenge ya Chat message mein bhejenge
@@ -98,4 +76,3 @@ class StreamController extends BaseController
         ]);
     }
 }
-

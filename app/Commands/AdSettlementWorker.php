@@ -25,7 +25,8 @@ class AdSettlementWorker extends BaseCommand
         $originalPct = (float)($settings['revenue_share_original_creator'] ?? 70);
         $uploaderPct = (float)($settings['revenue_share_uploader'] ?? 30);
 
-        $tables = ['ad_clicks', 'ad_views'];
+        // 🔥 FIX: 'ad_impressions' table array mein add ki gayi hai
+        $tables = ['ad_clicks', 'ad_views', 'ad_impressions'];
 
         foreach ($tables as $table) {
             CLI::write("-------------------------------------------", 'yellow');
@@ -76,7 +77,15 @@ class AdSettlementWorker extends BaseCommand
 
                 } else {
                     // 🚀 CASE 3: Normal Settlement (No Copyright)
-                    $this->processPayout($row->creator_id, $row->creator_revenue, ($table === 'ad_clicks' ? 'ad_click_revenue' : 'ad_view_revenue'), $row);
+                    // Earning type ko table ke hisaab se dynamically set kiya hai
+                    $earningType = 'ad_view_revenue';
+                    if ($table === 'ad_clicks') {
+                        $earningType = 'ad_click_revenue';
+                    } elseif ($table === 'ad_impressions') {
+                        $earningType = 'ad_impression_revenue';
+                    }
+
+                    $this->processPayout($row->creator_id, $row->creator_revenue, $earningType, $row);
                     CLI::write("✅ Normal ID {$row->id}: {$row->creator_revenue} USD to User {$row->creator_id}", 'green');
                 }
 
@@ -115,7 +124,12 @@ class AdSettlementWorker extends BaseCommand
             'created_at'   => date('Y-m-d H:i:s')
         ]);
 
-        // 2. Wallet Balance Update
-        $db->query("UPDATE creator_wallets SET balance = balance + ?, updated_at = NOW() WHERE user_id = ?", [$amount, $userId]);
+        // 2. Wallet Balance Update (🔥 100% SECURE UPSERT LOGIC FOR CREATOR WALLETS)
+        // Agar user ka wallet nahi hai to naya banayega, agar hai to balance plus (+) karega.
+        $walletQuery = "INSERT INTO creator_wallets (user_id, balance, base_currency, currency, status, created_at, updated_at) 
+                        VALUES (?, ?, 'INR', 'USD', 'active', NOW(), NOW()) 
+                        ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance), updated_at = NOW()";
+                        
+        $db->query($walletQuery, [$userId, $amount]);
     }
 }

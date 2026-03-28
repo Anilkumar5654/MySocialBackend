@@ -36,6 +36,11 @@ $routes->group('admin', ['namespace' => 'App\Controllers\Admin'], function ($rou
             $routes->post('update/(:num)', 'Users::update/$1');
             $routes->get('toggle_ban/(:num)', 'Users::toggle_ban/$1');
             $routes->get('delete/(:num)', 'Users::delete/$1');
+            
+            // ✨ SECURITY SNAPSHOT ACTIONS
+            $routes->get('force_logout_all/(:num)', 'Users::force_logout_all/$1');
+            $routes->get('reset_password_trigger/(:num)', 'Users::reset_password_trigger/$1');
+            $routes->get('toggle_2fa/(:num)', 'Users::toggle_2fa/$1');
         });
 
         // ✅ KYC MANAGEMENT
@@ -220,13 +225,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
 
     // 🛡️ COPYRIGHT ROUTES - PUBLIC 🛡️
     $routes->group('creator', ['namespace' => 'App\Controllers\Api\Creator'], function ($routes) {
-        // 1. Original videos ki list lane ke liye (app/creator/trust/index.tsx)
         $routes->get('copyright/original-videos', 'CopyrightController::getOriginalVideos');
-        
-        // 2. Specific video ke matched clips lane ke liye (app/creator/trust/matches/[id].tsx)
         $routes->get('copyright/matches/(:num)', 'CopyrightController::getMatchedClips/$1');
-        
-        // 3. Strike ya Claim action submit karne ke liye
         $routes->post('copyright/take-action', 'CopyrightController::takeAction');
     });
 
@@ -235,6 +235,8 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
 
         // 🟢 NAYA GLOBAL SEARCH ROUTE
         $routes->get('global-search', 'SearchController::index');
+        $routes->get('global-search/suggestions', 'SearchController::getSuggestions');
+
 
         // 👤 USER CONTROLLER
         $routes->group('users', function ($routes) {
@@ -253,13 +255,25 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->get('kyc_status', 'UserController::getKYCStatus');
             $routes->get('followers', 'UserController::getFollowers');
             $routes->get('following', 'UserController::getFollowing');
+            
+            // 🔥 NAYA SEARCH LOCATION ROUTE (Task Completed)
+            $routes->get('search_locations', 'UserController::searchLocations');
+            
+            // ✨ CREATOR FINANCE API
+            $routes->get('creator-finances', 'UserController::getCreatorFinances');
         });
 
         // 🔔 NOTIFICATIONS ROUTES
         $routes->group('notifications', function ($routes) {
             $routes->get('/', 'NotificationController::index');
+            $routes->get('requests', 'NotificationController::getFollowRequests'); // 🔥 ADDED
             $routes->post('mark-read/all', 'NotificationController::markRead/all');
             $routes->post('mark-read/(:any)', 'NotificationController::markRead/$1');
+        });
+
+        // 🔥 SOCIAL ACTIONS
+        $routes->group('social', ['namespace' => 'App\Controllers\Api\Actions'], function ($routes) {
+            $routes->post('handle-request', 'SocialController::handleFollowRequest'); // 🔥 ADDED
         });
 
         $routes->group('users/action', ['namespace' => 'App\Controllers\Api\Actions'], function ($routes) {
@@ -267,20 +281,30 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->post('unfollow', 'SocialController::toggleFollow');
             $routes->post('toggle_follow', 'UserController::toggleFollow');
             $routes->post('block', 'SocialController::toggleBlock');
+            // 🔥 Naya Notification Preference Route
+            $routes->post('notification_preference', 'SocialController::setNotificationPreference');
         });
 
+        // 🔥 INTERACTIONS SECTION
         $routes->group('interactions', ['namespace' => 'App\Controllers\Api\Actions'], function ($routes) {
             $routes->post('like', 'InteractionController::toggleLike');
+            $routes->get('likes-list', 'InteractionController::getLikesList'); 
             $routes->post('save', 'InteractionController::toggleSave');
             $routes->post('report', 'InteractionController::report');
             $routes->post('feedback', 'InteractionController::feedback');
             $routes->post('dislike', 'InteractionController::toggleDislike');
             $routes->post('share', 'InteractionController::share');
-            // 🔥 NAYA ROUTE FOR BATCH IMPRESSIONS
             $routes->post('trackImpressions', 'InteractionController::trackImpressions');
         });
 
         $routes->get('home/feed', 'PostController::getFeed');
+
+        // 🎵 MUSIC SYSTEM ROUTES
+        $routes->group('music', function ($routes) {
+            $routes->get('trending', 'MusicController::getTrending');
+            $routes->get('search', 'MusicController::search');
+            $routes->get('details', 'MusicController::getDetails');
+        });
 
         $routes->group('posts', function ($routes) {
             $routes->get('details', 'PostController::getDetails');
@@ -298,6 +322,18 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->delete('delete/(:num)', 'ReelsController::delete/$1');
         });
 
+        $routes->group('videos', function ($routes) {
+            $routes->get('/', 'VideoController::getVideos');
+            $routes->get('details', 'VideoController::getDetails');
+            $routes->get('recommended', 'VideoController::getRecommended');
+            $routes->post('track-watch', 'VideoController::trackWatch');
+            $routes->post('view', 'VideoController::incrementView');
+            $routes->post('upload', 'VideoController::upload');
+            $routes->post('update/(:num)', 'VideoController::update/$1');
+            $routes->delete('delete/(:num)', 'VideoController::delete/$1');
+        });
+
+        // ⚠️ BACKUP / REPEATED BLOCK AS REQUESTED (Rule 4 Keep same)
         $routes->group('videos', function ($routes) {
             $routes->get('/', 'VideoController::getVideos');
             $routes->get('details', 'VideoController::getDetails');
@@ -334,6 +370,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->get('dashboard', 'DashboardController::index');
             $routes->get('earnings', 'EarningsController::getDashboard');
             $routes->get('analytics/history', 'DashboardController::analytics');
+            $routes->get('analytics/detail/(:any)', 'AnalyticsController::detail/$1');
             $routes->get('strikes', 'TrustController::strikeDetails');
             $routes->post('submit-strike-appeal/(:num)', 'TrustController::submitStrikeAppeal/$1');
             $routes->post('monetization/apply', 'TrustController::applyForMonetization');
@@ -346,10 +383,14 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             });
 
             $routes->get('content', 'ContentController::index');
-            $routes->post('content/delete', 'ContentController::delete');
+            $routes->post('content/delete/(:any)', 'ContentController::delete/$1');
             $routes->post('content/update', 'ContentController::update');
-            $routes->get('content/analytics/(:any)', 'ContentController::analytics/$1');
+            $routes->get('content/analytics/(:num)/(:any)', 'AnalyticsController::getVideoAnalytics/$1/$2');
             $routes->get('content/details/(:any)', 'ContentController::details/$1');
+
+            // 🔥 Comments Routes
+            $routes->get('comments', 'CommentController::index');
+            $routes->post('content/delete-comment/(:num)', 'CommentController::delete/$1'); // 🔥 ADDED THIS
         });
 
         $routes->group('rewards', ['namespace' => 'App\Controllers\Api\User'], function ($routes) {
@@ -357,13 +398,13 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->post('claim-daily', 'RewardsController::claimDaily');
         });
 
+        // 🔥 COMMENTS
         $routes->group('comments', function ($routes) {
             $routes->get('list', 'CommentController::list');
             $routes->post('add', 'CommentController::add');
             $routes->delete('delete', 'CommentController::delete');
         });
 
-        // 🔥 STREAM VIDEO & CHAT ROUTES
         $routes->get('stream/token', 'StreamController::getToken');
         $routes->post('stream/create-call', 'StreamController::createCall');
 
@@ -377,6 +418,7 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
                 $routes->post('change-password', 'SecurityController::changePassword');
                 $routes->group('2fa', function ($routes) {
                     $routes->get('status', 'TwoFactorController::getStatus');
+                    $routes->get('enable', 'TwoFactorController::enable'); // Change post to get based on common patterns if needed, but keeping as is
                     $routes->post('enable', 'TwoFactorController::enable');
                     $routes->post('disable', 'TwoFactorController::disable');
                 });
@@ -400,7 +442,6 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
             $routes->match(['GET', 'POST'], 'track-impression', 'TrackingController::track_impression');
             $routes->post('track-click', 'TrackingController::track_click');
             $routes->get('analytics', 'CampaignController::get_analytics');
-            // 🔥 NEW ROUTE FOR PROMOTESCREEN SETTINGS
             $routes->get('settings', 'CampaignController::get_settings');
         });
 

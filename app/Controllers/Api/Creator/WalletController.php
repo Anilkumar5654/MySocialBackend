@@ -13,8 +13,18 @@ class WalletController extends BaseController {
         helper(['currency', 'url', 'media']);
     }
 
+    /**
+     * ✨ DYNAMIC LIMIT: Database se setting uthata hai
+     */
     private function getMinLimit($currency = 'INR') {
-        return ($currency === 'USD') ? 10.00 : 500.00;
+        $db = \Config\Database::connect();
+        $setting = $db->table('system_settings')
+                      ->where('setting_key', 'min_withdrawal_amount')
+                      ->get()->getRow();
+                      
+        $baseLimit = $setting ? (float)$setting->setting_value : 500.00;
+
+        return ($currency === 'USD') ? 10.00 : $baseLimit;
     }
 
     // =================================================================
@@ -22,7 +32,7 @@ class WalletController extends BaseController {
     // =================================================================
 
     /**
-     * ✅ UPDATED HISTORY: Ab isme Earnings + Top Content dono hain
+     * ✅ UPDATED HISTORY: Ab isme Earnings + Top Content + Payout Status + KYC Status + Settings hain
      */
     public function history() {
         try {
@@ -31,12 +41,19 @@ class WalletController extends BaseController {
 
             $db = \Config\Database::connect();
 
-            $user = $db->table('users')->select('preferred_currency')->where('id', $userId)->get()->getRow();
+            // 1. User Profile Sync
+            $user = $db->table('users')
+                       ->select('preferred_currency, is_payout_setup, kyc_status')
+                       ->where('id', $userId)
+                       ->get()->getRow();
+            
             $prefCurrency = $user->preferred_currency ?? 'INR';
+            $isPayoutSetup = (bool)($user->is_payout_setup ?? 0);
+            $kycStatus = $user->kyc_status ?? 'NOT_SUBMITTED';
 
             $wallet = $db->table('creator_wallets')->where('user_id', $userId)->get()->getRow();
 
-            // 1. Payouts History (Purana Logic)
+            // 2. Payouts History
             $payouts = $db->table('withdrawals')
                           ->select('amount, payment_method as type, status, created_at, "withdrawal" as category')
                           ->where('user_id', $userId)
@@ -49,23 +66,33 @@ class WalletController extends BaseController {
                 $p['amount'] = (float)$p['amount']; 
             }
 
-            // 2. 🔥 NEW: TOP EARNING CONTENT (Dashboard se yahan shift kiya)
+            // 3. 🔥 TOP EARNING CONTENT
             $topEarning = $this->getTopEarningContentLocal($db, $userId, $prefCurrency);
 
-            // 3. 🔥 NEW: YESTERDAY SETTLEMENT (Reward Tab ke liye zaruri)
+            // 4. 🔥 YESTERDAY SETTLEMENT
             $yesterdayRaw = $this->getLastAdsSettlementLocal($db, $userId);
+
+            // 5. 🔥 SYSTEM SETTINGS (Minimum Limit from DB)
+            $minLimit = $this->getMinLimit($prefCurrency);
 
             return $this->respond([
                 'success' => true,
                 'status'  => true,
+                'user'    => [
+                    'isPayoutSetup' => $isPayoutSetup,
+                    'kyc_status'    => $kycStatus
+                ],
+                'settings' => [
+                    'min_withdrawal' => $minLimit
+                ],
                 'wallet'  => [
                     'balance'               => format_currency($wallet->balance ?? 0, $prefCurrency),
                     'raw_balance'           => (float)($wallet->balance ?? 0.00),
-                    'yesterday_ads_revenue' => format_currency($yesterdayRaw, $prefCurrency), // ✅ Added
-                    'last_payout_date'      => $this->getLastPayoutDateLocal($db, $userId),  // ✅ Added
+                    'yesterday_ads_revenue' => format_currency($yesterdayRaw, $prefCurrency),
+                    'last_payout_date'      => $this->getLastPayoutDateLocal($db, $userId),
                 ],
                 'history' => $payouts,
-                'top_earning_content' => $topEarning // ✅ Added for Reward Tab
+                'top_earning_content' => $topEarning
             ]);
         } catch (Throwable $e) {
             return $this->failServerError($e->getMessage());
@@ -76,20 +103,38 @@ class WalletController extends BaseController {
         $userId = $this->request->getHeaderLine('User-ID');
         if (!$userId) return $this->failUnauthorized();
         $db = \Config\Database::connect();
-        $user = $db->table('users')->select('preferred_currency')->where('id', $userId)->get()->getRow();
+        
+        $user = $db->table('users')->select('preferred_currency, is_payout_setup, kyc_status')->where('id', $userId)->get()->getRow();
+        
+        if (!$user->is_payout_setup) return $this->fail('Please setup payout settings first.');
+        if ($user->kyc_status !== 'APPROVED') return $this->fail('KYC verification required.');
+
         $prefCurrency = $user->preferred_currency ?? 'INR';
         $input = $this->request->getJSON(true) ?? $this->request->getPost();
         $amount = (float)($input['amount'] ?? 0);
+        
+        // Use Dynamic Min Limit
         $minLimit = $this->getMinLimit($prefCurrency);
+        
         if ($amount < $minLimit) return $this->fail("Minimum withdrawal amount is " . format_currency($minLimit, $prefCurrency));
+        
         $wallet = $db->table('creator_wallets')->where('user_id', $userId)->get()->getRow();
         if (!$wallet || (float)$wallet->balance < $amount) return $this->fail('Insufficient balance.');
+        
         $settings = $db->table('user_payout_settings')->where('user_id', $userId)->get()->getRow();
         if (!$settings || (empty($settings->upi_id) && empty($settings->account_number))) return $this->fail('Setup Payout Settings first.');
+        
         $db->transStart();
-        $db->table('withdrawals')->insert(['user_id'=>$userId,'amount'=>$amount,'payment_method'=>$settings->payment_method ?? 'upi','status'=>'pending','created_at'=>date('Y-m-d H:i:s')]);
+        $db->table('withdrawals')->insert([
+            'user_id'=>$userId,
+            'amount'=>$amount,
+            'payment_method'=>$settings->payment_method ?? 'upi',
+            'status'=>'pending',
+            'created_at'=>date('Y-m-d H:i:s')
+        ]);
         $db->table('creator_wallets')->where('user_id', $userId)->decrement('balance', $amount);
         $db->transComplete();
+        
         if ($db->transStatus() === false) return $this->failServerError('Failed.');
         return $this->respond(['success'=>true,'message'=>'Request sent.']);
     }
@@ -151,7 +196,7 @@ class WalletController extends BaseController {
             $db->table('spending_wallets')->insert(['user_id' => $userId, 'balance' => 0.00, 'currency' => 'INR']);
         }
         $db->table('spending_wallets')->where('user_id', $userId)->increment('balance', $amount);
-        $this->db->table('wallet_transactions')->insert(['user_id'=>$userId,'wallet_type'=>'spending','amount'=>$amount,'type'=>'credit','description'=>"Wallet Recharge (Ref: $paymentId)",'created_at'=>date('Y-m-d H:i:s')]);
+        $db->table('wallet_transactions')->insert(['user_id'=>$userId,'wallet_type'=>'spending','amount'=>$amount,'type'=>'credit','description'=>"Wallet Recharge (Ref: $paymentId)",'created_at'=>date('Y-m-d H:i:s')]);
         $db->transComplete();
         if ($db->transStatus() === false) return $this->failServerError("Error.");
         $user = $db->table('users')->select('preferred_currency')->where('id', $userId)->get()->getRow();

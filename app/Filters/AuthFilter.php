@@ -79,6 +79,7 @@ class AuthFilter implements FilterInterface
 
     /**
      * Validate Token against Database
+     * ✨ UPGRADE: Added is_active check to support Session Killing
      */
     private function validateToken(string $token)
     {
@@ -90,6 +91,7 @@ class AuthFilter implements FilterInterface
         $row = $db->table('auth_tokens')
                   ->select('user_id')
                   ->where('token', $cleanToken)
+                  ->where('is_active', 1) // 👈 ✨ NEW: Only allow active sessions
                   // ✅ MASTER FIX: Use MySQL's NOW() to prevent Timezone issues
                   ->where('expires_at > NOW()') 
                   ->get()

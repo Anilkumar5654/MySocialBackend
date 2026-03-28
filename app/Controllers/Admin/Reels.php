@@ -49,16 +49,23 @@ class Reels extends BaseController
     }
 
     /**
-     * 👁️ VIEW REEL: Deep Analysis & Performance HUD
+     * 👁️ VIEW REEL: Deep Analysis & Performance HUD (Ultra Upgraded)
      */
     public function view($id)
     {
         if (!has_permission('reels.view')) return redirect()->to('admin/dashboard');
 
+        // [SECTION 1] Core Reel, Creator, and Channel Info (Upgraded for Deep Dive)
         $reel = $this->db->table('reels r')
-            ->select('r.*, u.username, u.name as full_name, u.avatar as user_avatar, c.name as channel_name, c.id as channel_id') 
+            ->select('r.*, u.username, u.name as full_name, u.avatar as user_avatar, u.is_verified as user_verified, u.followers_count,
+                      c.name as channel_name, c.id as channel_id, c.unique_id as channel_unique_id, c.videos_count as channel_videos_count,
+                      c.strikes_count, c.warnings_count, IFNULL(c.trust_score, 100) as trust_score, 
+                      ov.video_url as original_video_url, ov.thumbnail_url as original_thumbnail, ou.name as original_owner_name, 
+                      ov.created_at as original_created_at') 
             ->join('users u', 'u.id = r.user_id', 'left')
             ->join('channels c', 'c.id = r.channel_id', 'left')
+            ->join('reels ov', 'ov.id = r.original_content_id', 'left')
+            ->join('users ou', 'ou.id = ov.user_id', 'left')
             ->where('r.id', $id)
             ->get()->getRow();
 
@@ -72,7 +79,18 @@ class Reels extends BaseController
             ->get()->getResult();
         $reel->tags = implode(', ', array_column($tagsData, 'tag'));
 
-        // 📊 Advanced Stats Logic (Untouched as requested)
+        // [SECTION 2] Reports & Strikes
+        $reports = $this->db->table('reports r')
+            ->select('r.*, u.username as reporter_name')
+            ->join('users u', 'u.id = r.reporter_id', 'left')
+            ->where(['reportable_id' => $id, 'reportable_type' => 'reel'])
+            ->orderBy('r.id', 'DESC')->get()->getResult();
+
+        $reel_strike = $this->db->table('channel_strikes')
+            ->where(['content_id' => $id, 'content_type' => 'REEL', 'status' => 'ACTIVE'])
+            ->orderBy('id', 'DESC')->get()->getRow();
+
+        // 📊 Original Advanced Stats Logic (Preserved)
         $strikeCount = $this->db->table('channel_strikes')->where(['channel_id' => $reel->channel_id, 'status' => 'ACTIVE'])->countAllResults();
         $watchTime = $this->db->table('video_watch_sessions')->where(['video_id' => $id, 'video_type' => 'reel'])->selectSum('watch_duration')->get()->getRow()->watch_duration ?? 0;
 
@@ -90,16 +108,112 @@ class Reels extends BaseController
             ->where(['c.commentable_id' => $id, 'c.commentable_type' => 'reel'])
             ->orderBy('c.id', 'DESC')->limit(5)->get()->getResult();
 
+        // [SECTION 3] Monetization & Payouts (Real Data Integration)
+        $rev_share = $this->db->table('revenue_shares rs')
+            ->select('rs.*, u.username as claimant_username')
+            ->join('users u', 'u.id = rs.original_creator_id', 'left')
+            ->where(['rs.claimed_content_id' => $id, 'rs.content_type' => 'REEL', 'rs.status' => 'ACTIVE'])
+            ->get()->getRow();
+
+        $creator_earnings = $this->db->table('creator_earnings')
+            ->select('SUM(amount) as total_earnings')
+            ->where(['content_id' => $id, 'content_type' => 'reel'])
+            ->get()->getRow();
+            
+        $total_earnings = $creator_earnings->total_earnings ?? 0;
+
+        $total_imps = $this->db->tableExists('ad_impressions') 
+            ? $this->db->table('ad_impressions')->where(['content_id' => $id, 'content_type' => 'reel'])->countAllResults()
+            : 0;
+
+        $avg_rpm = ($total_imps > 0) ? ($total_earnings / $total_imps) * 1000 : 0;
+        $ad_stats = (object)[
+            'total_imps' => $total_imps,
+            'avg_rpm'    => number_format($avg_rpm, 2)
+        ];
+
+        // [SECTION 4] Analytics & Watch Trends (Last 7 Days)
+        $seven_days_ago = date('Y-m-d H:i:s', strtotime('-7 days'));
+        
+        $recent_views = $this->db->table('views')->where(['viewable_id' => $id, 'viewable_type' => 'reel', 'created_at >=' => $seven_days_ago])->countAllResults();
+        $recent_likes = $this->db->table('likes')->where(['likeable_id' => $id, 'likeable_type' => 'reel', 'created_at >=' => $seven_days_ago])->countAllResults();
+        $recent_comments = $this->db->table('comments')->where(['commentable_id' => $id, 'commentable_type' => 'reel', 'created_at >=' => $seven_days_ago])->countAllResults();
+
+        // Graph Data (Views by Day)
+        $graph_data = $this->db->query("
+            SELECT DATE(created_at) as date, COUNT(id) as count 
+            FROM views 
+            WHERE viewable_id = ? AND viewable_type = 'reel' AND created_at >= ?
+            GROUP BY DATE(created_at) 
+            ORDER BY date ASC
+        ", [$id, $seven_days_ago])->getResult();
+
+        // [SECTION 5] Audience Insights (Geo, Age, Device)
+        $geo_stats = $this->db->query("
+            SELECT u.country, COUNT(v.id) as count 
+            FROM views v 
+            JOIN users u ON u.id = v.user_id 
+            WHERE v.viewable_id = ? AND v.viewable_type = 'reel' 
+            GROUP BY u.country 
+            ORDER BY count DESC LIMIT 5
+        ", [$id])->getResult();
+
+        $age_stats = $this->db->query("
+            SELECT 
+                CASE 
+                    WHEN TIMESTAMPDIFF(YEAR, u.dob, CURDATE()) BETWEEN 13 AND 17 THEN '13-17'
+                    WHEN TIMESTAMPDIFF(YEAR, u.dob, CURDATE()) BETWEEN 18 AND 24 THEN '18-24'
+                    WHEN TIMESTAMPDIFF(YEAR, u.dob, CURDATE()) BETWEEN 25 AND 34 THEN '25-34'
+                    WHEN TIMESTAMPDIFF(YEAR, u.dob, CURDATE()) BETWEEN 35 AND 44 THEN '35-44'
+                    ELSE '45+' 
+                END as age_group,
+                COUNT(v.id) as count
+            FROM views v 
+            JOIN users u ON u.id = v.user_id 
+            WHERE v.viewable_id = ? AND v.viewable_type = 'reel' AND u.dob IS NOT NULL
+            GROUP BY age_group
+        ", [$id])->getResult();
+
+        $device_stats = $this->db->query("
+            SELECT a.device_type, COUNT(v.id) as count 
+            FROM views v 
+            JOIN auth_tokens a ON a.user_id = v.user_id 
+            WHERE v.viewable_id = ? AND v.viewable_type = 'reel' AND a.device_type IS NOT NULL
+            GROUP BY a.device_type
+        ", [$id])->getResult();
+
+        $process_log = $this->db->tableExists('video_processing_queue') ? $this->db->table('video_processing_queue')->where(['video_id' => $id, 'video_type' => 'reel'])->orderBy('id', 'DESC')->get()->getRow() : null;
+
+        // Merge original stats with new deep dive metrics
+        $stats = [
+            'watch_time_hrs'  => round($watchTime / 3600, 2),
+            'avg_watch_dur'   => gmdate("i:s", (int)($watchTime / max(1, $views))),
+            'avg_completion'  => min(100, round(($watchTime / max(1, $views)) / max(1, $reel->duration) * 100, 1)),
+            'engagement_rate' => round($engagementRate, 2),
+            'viral_score'     => round($finalScore, 0),
+            'viral_percent'   => min(100, round(($finalScore / 5000) * 100, 1)),
+            'active_strikes'  => $strikeCount,
+            'recent_views'    => $recent_views,
+            'recent_likes'    => $recent_likes,
+            'recent_comments' => $recent_comments
+        ];
+
         return view('admin/reels/view', [
-            'reel'     => $reel,
-            'comments' => $comments,
-            'stats'    => [
-                'watch_time_hrs'  => round($watchTime / 3600, 2),
-                'engagement_rate' => round($engagementRate, 2),
-                'viral_score'     => round($finalScore, 0),
-                'viral_percent'   => min(100, round(($finalScore / 5000) * 100, 1)),
-                'active_strikes'  => $strikeCount
-            ]
+            'reel'             => $reel,
+            'video'            => $reel, // Passing as $video too to keep View UI code compatible
+            'video_strike'     => $reel_strike,
+            'comments'         => $comments,
+            'reports'          => $reports,
+            'ad_stats'         => $ad_stats,
+            'creator_earnings' => $creator_earnings,
+            'rev_share'        => $rev_share,
+            'process_log'      => $process_log,
+            'stats'            => $stats,
+            'graph_data'       => $graph_data,
+            'geo_stats'        => $geo_stats,
+            'age_stats'        => $age_stats,
+            'device_stats'     => $device_stats,
+            'title'            => 'Reel Deep Dive Intelligence'
         ]);
     }
 
@@ -148,7 +262,7 @@ class Reels extends BaseController
     }
 
     /**
-     * 🗑️ DELETE REEL: Full Cleanup Logic
+     * 🗑️ DELETE REEL: Full Cleanup Logic (Upgraded for Deep Dive Tables)
      */
     public function delete($id)
     {
@@ -158,8 +272,20 @@ class Reels extends BaseController
         if (!$reel) return redirect()->back();
 
         $this->db->transStart();
+        
+        // Wipe all dependencies dynamically
         $this->db->table('taggables')->where(['taggable_id' => $id, 'taggable_type' => 'reel'])->delete();
         $this->db->table('video_watch_sessions')->where(['video_id' => $id, 'video_type' => 'reel'])->delete();
+        
+        // Deep Dive cleanup additions
+        if ($this->db->tableExists('views')) $this->db->table('views')->where(['viewable_id' => $id, 'viewable_type' => 'reel'])->delete();
+        if ($this->db->tableExists('likes')) $this->db->table('likes')->where(['likeable_id' => $id, 'likeable_type' => 'reel'])->delete();
+        if ($this->db->tableExists('comments')) $this->db->table('comments')->where(['commentable_id' => $id, 'commentable_type' => 'reel'])->delete();
+        if ($this->db->tableExists('reports')) $this->db->table('reports')->where(['reportable_id' => $id, 'reportable_type' => 'reel'])->delete();
+        if ($this->db->tableExists('ad_impressions')) $this->db->table('ad_impressions')->where(['content_id' => $id, 'content_type' => 'reel'])->delete();
+        if ($this->db->tableExists('ad_clicks')) $this->db->table('ad_clicks')->where(['content_id' => $id, 'content_type' => 'reel'])->delete();
+        if ($this->db->tableExists('channel_strikes')) $this->db->table('channel_strikes')->where(['content_id' => $id, 'content_type' => 'REEL'])->delete();
+
         $this->db->table('reels')->where('id', $id)->delete();
         $this->db->transComplete();
 
@@ -186,4 +312,3 @@ class Reels extends BaseController
         return redirect()->back()->with('success', 'Comment purged.');
     }
 }
-

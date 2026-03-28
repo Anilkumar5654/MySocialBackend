@@ -48,6 +48,23 @@ class ReelsController extends BaseController
         return $item;
     }
 
+    /**
+     * 🔥 FORMAT MUSIC - Helper function to format music object
+     */
+    private function formatMusicData($row)
+    {
+        if (!empty($row['music_id'])) {
+            return [
+                "id" => (string)$row['music_id'],
+                "title" => $row['music_title'] ?? '',
+                "artist" => $row['music_artist'] ?? '',
+                "audio_url" => get_media_url($row['music_url'] ?? '', 'audio'),
+                "cover_url" => get_media_url($row['music_cover'] ?? '', 'image')
+            ];
+        }
+        return null;
+    }
+
     // ✅ 1. GET SINGLE REEL DETAILS
     public function getDetails()
     {
@@ -58,12 +75,15 @@ class ReelsController extends BaseController
             return $this->fail(['error' => 'Reel ID is required']);
         }
 
+        // 🔥 MODIFIED: Added music table join and extra flags
         $sql = "SELECT r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, 
+                m.title as music_title, m.artist as music_artist, m.audio_url as music_url, m.cover_url as music_cover,
                 (CASE WHEN l.id IS NOT NULL THEN 1 ELSE 0 END) as is_liked, 
                 (CASE WHEN sv.id IS NOT NULL THEN 1 ELSE 0 END) as is_saved, 
                 (CASE WHEN f.id IS NOT NULL THEN 1 ELSE 0 END) as is_following 
                 FROM reels r 
                 JOIN users u ON r.user_id = u.id 
+                LEFT JOIN music m ON m.id = r.music_id
                 LEFT JOIN likes l ON r.id = l.likeable_id AND l.likeable_type = 'reel' AND l.user_id = ? 
                 LEFT JOIN saves sv ON r.id = sv.saveable_id AND sv.saveable_type = 'reel' AND sv.user_id = ? 
                 LEFT JOIN follows f ON f.follower_id = ? AND f.following_id = r.user_id 
@@ -90,6 +110,10 @@ class ReelsController extends BaseController
             "is_following" => (bool)($reel['is_following'] ?? false)
         ];
 
+        // 🔥 MODIFIED: Music formatting
+        $reel['music'] = $this->formatMusicData($reel);
+        unset($reel['music_title'], $reel['music_artist'], $reel['music_url'], $reel['music_cover']);
+
         return $this->respond(['success' => true, 'reel' => $this->normalizeKeys($reel)]);
     }
 
@@ -111,8 +135,9 @@ class ReelsController extends BaseController
                              ->countAllResults();
 
         $builder = $this->db->table('reels r');
-        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified');
+        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, m.title as music_title, m.artist as music_artist, m.audio_url as music_url, m.cover_url as music_cover');
         $builder->join('users u', 'r.user_id = u.id');
+        $builder->join('music m', 'm.id = r.music_id', 'left');
         $builder->where('r.user_id', $targetUserId);
         $builder->where('r.status', 'published');
         $builder->where('r.visibility', 'public');
@@ -121,7 +146,7 @@ class ReelsController extends BaseController
             $escapedUserId = $this->db->escape($currentUserId);
             $builder->select("(CASE WHEN (SELECT 1 FROM likes WHERE likeable_id = r.id AND likeable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_liked");
             $builder->select("(CASE WHEN (SELECT 1 FROM saves WHERE saveable_id = r.id AND saveable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_saved");
-            $builder->select("(CASE WHEN (SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id) THEN 1 ELSE 0 END) as is_following");
+            $builder->select("(SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id LIMIT 1) as is_following");
         }
 
         $builder->orderBy('r.created_at', 'DESC');
@@ -141,6 +166,10 @@ class ReelsController extends BaseController
                 "is_verified" => $row['user_verified'],
                 "is_following" => (bool)($row['is_following'] ?? false)
             ];
+            
+            $row['music'] = $this->formatMusicData($row);
+            unset($row['music_title'], $row['music_artist'], $row['music_url'], $row['music_cover']);
+            
             $row = $this->normalizeKeys($row);
         }
 
@@ -174,8 +203,9 @@ class ReelsController extends BaseController
         $totalCount = $countBuilder->countAllResults();
 
         $builder = $this->db->table('reels r');
-        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified');
+        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, m.title as music_title, m.artist as music_artist, m.audio_url as music_url, m.cover_url as music_cover');
         $builder->join('users u', 'r.user_id = u.id');
+        $builder->join('music m', 'm.id = r.music_id', 'left');
         $builder->where('r.user_id', $targetUserId);
 
         if ($excludeReelId) {
@@ -189,7 +219,7 @@ class ReelsController extends BaseController
             $escapedUserId = $this->db->escape($currentUserId);
             $builder->select("(CASE WHEN (SELECT 1 FROM likes WHERE likeable_id = r.id AND likeable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_liked");
             $builder->select("(CASE WHEN (SELECT 1 FROM saves WHERE saveable_id = r.id AND saveable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_saved");
-            $builder->select("(CASE WHEN (SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id) THEN 1 ELSE 0 END) as is_following");
+            $builder->select("(SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id LIMIT 1) as is_following");
         }
 
         $builder->orderBy('r.created_at', 'DESC');
@@ -209,6 +239,10 @@ class ReelsController extends BaseController
                 "is_verified" => $row['user_verified'],
                 "is_following" => (bool)($row['is_following'] ?? false)
             ];
+            
+            $row['music'] = $this->formatMusicData($row);
+            unset($row['music_title'], $row['music_artist'], $row['music_url'], $row['music_cover']);
+            
             $row = $this->normalizeKeys($row);
         }
 
@@ -222,83 +256,81 @@ class ReelsController extends BaseController
         ]);
     }
 
-    // ✅ 4. TRACK WATCH TIME (REAL RETENTION FIXED)
+    /**
+     * ✅ 4. TRACK WATCH TIME
+     */
     public function trackWatch()
     {
         $rawInput = file_get_contents('php://input');
         $input = json_decode($rawInput, true) ?: $this->request->getPost();
         $id = $input['reel_id'] ?? $input['id'] ?? null;
         $watchDuration = (int)($input['watch_duration'] ?? 0);
-        $deviceId = $input['device_id'] ?? null;
         $userId = $this->request->getHeaderLine('User-ID') ?: null;
+        $ipAddress = $this->request->getIPAddress();
+        $timestamp = date('Y-m-d H:i:s');
 
-        if (!$id) return $this->fail(['error' => 'Reel ID missing']);
-        if ($watchDuration < 1) return $this->respond(['success' => true]);
+        $trafficSource = $input['traffic_source'] ?? 'shorts_feed';
 
-        // 1. Duration fetch karo completion rate ke liye
-        $reel = $this->db->table('reels')->select('id, user_id, channel_id, duration')
+        if (!$id || $watchDuration < 1) return $this->respond(['success' => true]);
+
+        $reel = $this->db->table('reels')->select('id, duration, user_id')
             ->groupStart()->where('id', $id)->orWhere('unique_id', $id)->groupEnd()
             ->get()->getRowArray();
 
-        if (!$reel) return $this->failNotFound('Reel not found.');
+        if (!$reel) return $this->failNotFound();
         
         $actualId = $reel['id'];
         $totalDuration = (int)$reel['duration'];
 
         try {
-            // 🔥 REAL RETENTION CALCULATION
-            $completionRate = 0;
-            if ($totalDuration > 0) {
-                $completionRate = ($watchDuration / $totalDuration) * 100;
-                if ($completionRate > 100) $completionRate = 100; 
-            }
+            $this->db->transStart();
 
-            $sessionUserId = !empty($userId) ? $userId : null;
-            $ipAddress = $this->request->getIPAddress();
-            $today = date('Y-m-d');
-            
-            // 2. Check existing session for today
-            $sessionBuilder = $this->db->table('video_watch_sessions')
-                ->where('video_id', $actualId)
-                ->where('video_type', 'reel')
-                ->where('created_at >=', $today . ' 00:00:00');
+            $existingView = $this->db->table('views')
+                ->where(['viewable_id' => $actualId, 'viewable_type' => 'reel'])
+                ->groupStart()
+                    ->where('user_id', $userId)
+                    ->orWhere('ip_address', $ipAddress)
+                ->groupEnd()
+                ->where('created_at >=', date('Y-m-d H:i:s', strtotime('-30 minutes')))
+                ->orderBy('id', 'DESC')
+                ->get()->getRow();
 
-            if ($sessionUserId) {
-                $sessionBuilder->where('user_id', $sessionUserId);
-            } else {
-                $sessionBuilder->where('device_id', $deviceId)->where('ip_address', $ipAddress);
-            }
+            if ($existingView) {
+                $newDuration = $existingView->watch_duration + $watchDuration;
+                $newCompletion = ($totalDuration > 0) ? min(100, ($newDuration / $totalDuration) * 100) : 0;
 
-            $existingSession = $sessionBuilder->get()->getRow();
-            
-            if ($existingSession) {
-                if ($watchDuration > $existingSession->watch_duration) {
-                    $this->db->table('video_watch_sessions')->where('id', $existingSession->id)->update([
-                        'watch_duration' => $watchDuration,
-                        'completion_rate' => $completionRate, // ✅ Update rate
-                        'updated_at' => date('Y-m-d H:i:s')
-                    ]);
-                }
-            } else {
-                // Naya session with real completion rate
-                $this->db->table('video_watch_sessions')->insert([
-                    'user_id' => $sessionUserId,
-                    'video_id' => $actualId,
-                    'video_type' => 'reel',
-                    'watch_duration' => $watchDuration,
-                    'completion_rate' => $completionRate, // ✅ Save rate
-                    'device_id' => $deviceId,
-                    'ip_address' => $ipAddress,
-                    'created_at' => date('Y-m-d H:i:s')
+                $this->db->table('views')->where('id', $existingView->id)->update([
+                    'watch_duration'  => $newDuration,
+                    'completion_rate' => $newCompletion,
+                    'updated_at'      => $timestamp
                 ]);
-                
-                // Naya session hai toh view count bhi badhao
-                $this->db->table('reels')->where('id', $actualId)->increment('views_count');
+            } else {
+                $completionRate = ($totalDuration > 0) ? min(100, ($watchDuration / $totalDuration) * 100) : 0;
+                $this->db->table('views')->insert([
+                    'user_id'         => $userId,
+                    'creator_id'      => $reel['user_id'],
+                    'viewable_id'     => $actualId,
+                    'viewable_type'   => 'reel',
+                    'watch_duration'  => $watchDuration,
+                    'completion_rate' => $completionRate,
+                    'ip_address'      => $ipAddress,
+                    'traffic_source'  => $trafficSource,
+                    'created_at'      => $timestamp,
+                    'updated_at'      => $timestamp
+                ]);
             }
 
-            return $this->respond(['success' => true]);
+            $realCount = $this->db->table('views')
+                ->where(['viewable_id' => $actualId, 'viewable_type' => 'reel'])
+                ->countAllResults();
+
+            $this->db->table('reels')->where('id', $actualId)->update(['views_count' => $realCount]);
+
+            $this->db->transComplete();
+
+            return $this->respond(['success' => true, 'synced_views' => $realCount]);
         } catch (\Exception $e) {
-            return $this->failServerError('Track Error: ' . $e->getMessage());
+            return $this->failServerError($e->getMessage());
         }
     }
 
@@ -319,9 +351,10 @@ class ReelsController extends BaseController
         }
 
         $builder = $this->db->table('reels r');
-        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, c.trust_score as channel_trust_score');
+        $builder->select('r.*, u.username as handle, u.name as display_name, u.avatar as user_avatar, u.id as user_id, u.is_verified as user_verified, c.trust_score as channel_trust_score, m.title as music_title, m.artist as music_artist, m.audio_url as music_url, m.cover_url as music_cover');
         $builder->join('users u', 'r.user_id = u.id');
         $builder->join('channels c', 'r.channel_id = c.id', 'left');
+        $builder->join('music m', 'm.id = r.music_id', 'left');
         $builder->where('r.status', 'published');
         $builder->where('r.visibility', 'public');
 
@@ -329,7 +362,7 @@ class ReelsController extends BaseController
             $escapedUserId = $this->db->escape($currentUserId);
             $builder->select("(CASE WHEN (SELECT 1 FROM likes WHERE likeable_id = r.id AND likeable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_liked");
             $builder->select("(CASE WHEN (SELECT 1 FROM saves WHERE saveable_id = r.id AND saveable_type = 'reel' AND user_id = {$escapedUserId}) THEN 1 ELSE 0 END) as is_saved");
-            $builder->select("(CASE WHEN (SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id) THEN 1 ELSE 0 END) as is_following");
+            $builder->select("(SELECT 1 FROM follows WHERE follower_id = {$escapedUserId} AND following_id = r.user_id LIMIT 1) as is_following");
         }
 
         $builder->orderBy("CASE WHEN r.created_at >= NOW() - INTERVAL 3 DAY THEN 1 ELSE 2 END", "ASC");
@@ -351,6 +384,10 @@ class ReelsController extends BaseController
                 "is_verified" => $row['user_verified'],
                 "is_following" => (bool)($row['is_following'] ?? false)
             ];
+            
+            $row['music'] = $this->formatMusicData($row);
+            unset($row['music_title'], $row['music_artist'], $row['music_url'], $row['music_cover']);
+            
             $row = $this->normalizeKeys($row);
         }
 
@@ -363,7 +400,7 @@ class ReelsController extends BaseController
         return $this->respond(['success' => true, 'reels' => $injected, 'hasMore' => count($reels) == $limit, 'seed' => (int)$seed]);
     }
 
-    // ✅ 6. UPLOAD REEL
+    // ✅ 6. UPLOAD REEL (UPGRADED FOR IMAGE/VIDEO & SEPARATE AUDIO)
     public function upload()
     {
         set_time_limit(0);
@@ -373,60 +410,90 @@ class ReelsController extends BaseController
         $channel = $this->db->table('channels')->where('user_id', $currentUserId)->get()->getRow();
         if (!$channel) return $this->failForbidden('Channel not found.');
 
-        $videoFile = $this->request->getFile('video') ?? $this->request->getFile('file');
-        if (!$videoFile || !$videoFile->isValid()) return $this->fail('Video file missing or invalid.');
+        // 🔥 Support both Image and Video
+        $mediaFile = $this->request->getFile('video') ?? $this->request->getFile('file');
+        if (!$mediaFile || !$mediaFile->isValid()) return $this->fail('Media file missing or invalid.');
+
+        // 🔥 Fetching New Level Flags from App
+        $musicId = $this->request->getPost('music_id') ?: null;
+        $mediaType = $this->request->getPost('media_type') ?? 'video'; // image or video
+        $originalMuted = $this->request->getPost('original_sound_muted') ?? '0';
+        $isSeparateAudio = $this->request->getPost('is_separate_audio') ?? '0';
+        $allowDownload = $this->request->getPost('allow_download') ?? '1';
 
         $ffmpegSetting = $this->db->table('system_settings')->where('setting_key', 'ffmpeg_enabled')->get()->getRow();
         $isFfmpegEnabled = ($ffmpegSetting && $ffmpegSetting->setting_value === 'true');
 
-        $videoDbPath = null;
-        if ($isFfmpegEnabled) {
-            $tempDir = FCPATH . 'uploads/temp/';
+        $mediaDbPath = null;
+        // If image or forced mute, we must process via FFmpeg queue
+        $needsProcessing = ($isFfmpegEnabled && ($mediaType === 'image' || $originalMuted === '1' || $isFfmpegEnabled));
+
+        if ($needsProcessing) {
+            $tempDir = ROOTPATH . 'public/uploads/temp/';
             if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
-            $newName = time() . '_' . $videoFile->getRandomName();
-            if ($videoFile->move($tempDir, $newName)) {
-                $videoDbPath = 'temp/' . $newName;
+            $newName = time() . '_' . $mediaFile->getRandomName();
+            if ($mediaFile->move($tempDir, $newName)) {
+                $mediaDbPath = 'temp/' . $newName;
             }
         } else {
-            $videoDbPath = upload_media_master($videoFile, 'reel');
+            $mediaDbPath = upload_media_master($mediaFile, 'reel');
         }
 
-        if (!$videoDbPath) return $this->failServerError('Upload Failed');
+        if (!$mediaDbPath) return $this->failServerError('Upload Failed');
 
-        $uniqueId = 'REL' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 10));
+        $this->db->transStart();
 
         $data = [
             'user_id' => $currentUserId,
             'channel_id' => $channel->id,
-            'unique_id' => $uniqueId,
-            'video_url' => $videoDbPath,
+            'music_id' => $musicId,
+            'video_url' => $mediaDbPath,
             'caption' => $this->request->getPost('caption') ?? '',
             'duration' => (int)($this->request->getPost('duration') ?? 0),
             'visibility' => $this->request->getPost('visibility') ?? 'public',
-            'status' => $isFfmpegEnabled ? 'processing' : 'published',
+            'media_type' => $mediaType, // 🔥 Saved for backend logic
+            'original_sound_muted' => $originalMuted, // 🔥 Mute flag
+            'is_separate_audio' => $isSeparateAudio, // 🔥 Copyright flag
+            'allow_download' => $allowDownload, // 🔥 Security flag
+            'status' => $needsProcessing ? 'processing' : 'published',
             'created_at' => date('Y-m-d H:i:s')
         ];
 
-        if ($this->db->table('reels')->insert($data)) {
-            $newReelId = $this->db->insertID();
-
-            if ($isFfmpegEnabled) {
-                $this->db->table('video_processing_queue')->insert([
-                    'video_id' => $newReelId,
-                    'channel_id' => $channel->id,
-                    'video_type' => 'reel',
-                    'input_path' => $videoDbPath,
-                    'status' => 'pending',
-                    'created_at' => date('Y-m-d H:i:s')
-                ]);
-            }
-
-            if (!empty($data['caption'])) {
-                $this->hashtagHelper->syncHashtags($newReelId, 'reel', $data['caption']);
-            }
-            return $this->respondCreated(['success' => true, 'reel_id' => (string)$newReelId, 'unique_id' => $uniqueId]);
+        if (!empty($musicId)) {
+            $this->db->query("UPDATE music SET usage_count = usage_count + 1 WHERE id = ?", [$musicId]);
         }
-        return $this->failServerError('DB Insert Failed');
+
+        $this->db->table('reels')->insert($data);
+        $newReelId = $this->db->insertID();
+
+        $actualReelsCount = $this->db->table('reels')->where('user_id', $currentUserId)->countAllResults();
+        $this->db->table('users')->where('id', $currentUserId)->update(['reels_count' => $actualReelsCount]);
+
+        if ($needsProcessing) {
+            $this->db->table('video_processing_queue')->insert([
+                'video_id' => $newReelId,
+                'channel_id' => $channel->id,
+                'video_type' => 'reel',
+                'input_path' => $mediaDbPath,
+                'media_type' => $mediaType, // Image needs video conversion
+                'original_sound_muted' => $originalMuted,
+                'music_id' => $musicId,
+                'status' => 'pending',
+                'created_at' => date('Y-m-d H:i:s')
+            ]);
+        }
+
+        if (!empty($data['caption'])) {
+            $this->hashtagHelper->syncHashtags($newReelId, 'reel', $data['caption']);
+        }
+
+        $this->db->transComplete();
+
+        if ($this->db->transStatus() === false) {
+            return $this->failServerError('Upload failed.');
+        }
+
+        return $this->respondCreated(['success' => true, 'reel_id' => (string)$newReelId]);
     }
 
     // ✅ 7. DELETE REEL
@@ -436,11 +503,29 @@ class ReelsController extends BaseController
         if (!$id) $id = $this->request->getVar('id');
 
         $reel = $this->db->table('reels')->where('user_id', $userId)->groupStart()->where('id', $id)->orWhere('unique_id', $id)->groupEnd()->get()->getRow();
+        
         if ($reel) {
+            $this->db->transStart();
+
             if (!empty($reel->video_url)) {
                 delete_media_master($reel->video_url);
             }
+
+            if (!empty($reel->music_id)) {
+                $this->db->query("UPDATE music SET usage_count = GREATEST(usage_count - 1, 0) WHERE id = ?", [$reel->music_id]);
+            }
+
             $this->db->table('reels')->where('id', $reel->id)->delete();
+
+            $actualReelsCount = $this->db->table('reels')->where('user_id', $userId)->countAllResults();
+            $this->db->table('users')->where('id', $userId)->update(['reels_count' => $actualReelsCount]);
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                return $this->failServerError('Delete failed.');
+            }
+
             return $this->respondDeleted(['success' => true]);
         }
         return $this->failNotFound();

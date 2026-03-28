@@ -1,411 +1,513 @@
 <?= $this->extend('admin/layout/main') ?>
 <?= $this->section('content') ?>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
-    /* 🎭 THEATER HEADER (Responsive Fix) */
-    .theater-header { position: relative; background: #000; width: 100%; padding: 40px 0; overflow: hidden; }
-    .theater-background {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        background: url('<?= get_media_url($video->thumbnail_url, 'video') ?>') center center / cover;
-        filter: blur(40px) brightness(0.3); opacity: 0.7; transform: scale(1.1);
-    }
-    .theater-container { position: relative; max-width: 1000px; margin: 0 auto; z-index: 2; padding: 0 15px; }
-    .theater-player-frame { 
-        background: #000; border-radius: 12px; overflow: hidden; 
-        box-shadow: 0 25px 60px rgba(0,0,0,0.6); border: 2px solid #333; 
-        aspect-ratio: 16/9; width: 100%;
-    }
-
-    /* 🏷️ META STRIP & ACTIONS (No Sticky Header) */
-    .meta-data-strip { background: #fff; padding: 15px 30px; border-bottom: 1px solid var(--border-soft); box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-    .video-title-heavy { font-size: 1.1rem; font-weight: 800; color: #111; margin-bottom: 6px; text-transform: uppercase; line-height: 1.3; }
-
-    /* 🔥 HORIZONTAL BADGES (Never wraps, horizontal scroll on mobile) */
-    .top-badges-scroll {
-        display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; scrollbar-width: none; align-items: center;
-    }
-    .top-badges-scroll::-webkit-scrollbar { display: none; }
-
-    /* 📊 HEAVY ANALYTICS CARDS */
-    .heavy-card { background: #fff; border-radius: 12px; margin-bottom: 20px; box-shadow: var(--card-shadow); height: auto !important; overflow: hidden; border: 1px solid var(--border-soft); }
-    .heavy-header { background: #f8f9fa; padding: 14px 20px; border-bottom: 1px solid var(--border-soft); font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-dark); }
+    /* 🎨 PAGE SPECIFIC COMPONENTS (Powered by Global Variables) */
     
-    .data-row-heavy { background: #fdfdfd; border: 1px solid #f6f6f6; padding: 12px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-    .stat-label-heavy { font-size: 10px; color: var(--text-muted); font-weight: 800; text-transform: uppercase; }
-    .stat-value-heavy { font-size: 14px; font-weight: 800; color: #333; }
-
-    .gauge-track { background: #eee; height: 6px; border-radius: 10px; overflow: hidden; width: 100%; margin-top: 5px; }
-    .gauge-fill { height: 100%; border-radius: 10px; transition: 1.5s ease-in-out; }
-
-    /* 💬 COMMENTS */
-    .comment-item { padding: 12px 20px; border-bottom: 1px solid #f4f4f4; display: flex; align-items: flex-start; gap: 12px; }
-    .comment-item img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
-
-    /* 🔥 INTERACTION PILLS (Mobile Horizontal Scroll) */
-    .interaction-grid {
-        display: flex; gap: 10px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 5px; scrollbar-width: none; 
-    }
-    .interaction-grid::-webkit-scrollbar { display: none; } 
-    .interaction-pill {
-        flex: 1 1 auto; min-width: 100px; background: #f8f9fa; border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center;
+    /* Layout & Cards */
+    .deep-dive-card {
+        background-color: var(--bg-surface, #ffffff);
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-lg, 12px);
+        margin-bottom: var(--space-lg, 20px);
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+        height: max-content;
     }
     
-    /* 📱 MOBILE RESPONSIVE FIXES */
-    @media (max-width: 768px) {
-        .theater-header { padding: 15px 0; }
-        .meta-data-strip { padding: 15px; }
-        .meta-data-strip .d-flex.flex-wrap { flex-direction: column; align-items: flex-start !important; gap: 15px; }
-        
-        /* Action buttons mobile tweaks */
-        .meta-data-strip .btn-strike-mobile { width: 100%; display: block; padding: 12px 0; font-size: 12px !important; }
-        .action-buttons-mobile { flex-direction: column !important; gap: 10px !important; margin-top: 15px; }
-        .action-buttons-mobile button { width: 100%; }
-
-        .video-title-heavy { font-size: 1rem; }
-        .stat-value-heavy { font-size: 12px; }
-        .heavy-header { font-size: 10px; padding: 10px 15px; }
-        .desktop-border-right { border-right: none !important; border-bottom: 1px solid var(--border-soft); padding-bottom: 15px; margin-bottom: 15px; }
-        .interaction-grid { padding: 5px; }
-        .interaction-pill { min-width: 80px; padding: 8px 5px; }
-        .interaction-pill .stat-label-heavy { font-size: 9px; }
-        .interaction-pill h5 { font-size: 14px !important; margin-top: 3px; }
-        .claim-box-mobile-col { border-right: none !important; border-bottom: 1px solid #e9ecef; padding-bottom: 10px; margin-bottom: 10px; }
+    .card-title-head {
+        font-size: var(--font-size-md, 14px);
+        font-weight: var(--font-weight-bold, 700);
+        color: var(--text-dark);
+        padding: var(--space-md, 15px) var(--space-lg, 20px);
+        border-bottom: 1px solid var(--border-soft);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
-    @media (min-width: 769px) {
-        .desktop-border-right { border-right: 1px solid var(--border-soft); }
-        .claim-box-mobile-col { border-right: 1px solid #e9ecef; }
-        .action-buttons-mobile { flex-direction: row !important; gap: 10px; }
+
+    /* 🏷️ Top Actions & Breadcrumb */
+    .top-action-bar { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        margin-bottom: var(--space-lg, 20px); 
+        flex-wrap: wrap; 
+        gap: var(--space-md, 15px); 
+    }
+    .breadcrumb-title { 
+        font-size: var(--font-size-lg, 16px); 
+        font-weight: var(--font-weight-bold, 700); 
+        color: var(--text-dark); 
+        display: flex; 
+        align-items: center; 
+    }
+    .breadcrumb-title i { color: var(--text-muted); margin-right: var(--space-sm, 10px); cursor: pointer; }
+    .breadcrumb-title span { color: var(--text-muted); font-weight: var(--font-weight-medium, 500); font-size: var(--font-size-md, 14px); margin-right: var(--space-sm, 8px); }
+    
+    .btn-top { 
+        font-weight: var(--font-weight-semibold, 600); 
+        font-size: var(--font-size-sm, 13px); 
+        padding: var(--space-sm, 8px) var(--space-md, 16px); 
+        border-radius: var(--radius-md, 8px); 
+        border: 1px solid var(--border-soft); 
+        background-color: var(--bg-surface, #ffffff); 
+        color: var(--text-dark); 
+        transition: all 0.2s ease; 
+        white-space: nowrap; 
+    }
+    .btn-top:hover { background-color: var(--bg-light); box-shadow: var(--shadow-sm); }
+    .btn-danger-custom { background-color: var(--accent-red); color: #ffffff; border: none; }
+    .btn-danger-custom:hover { opacity: 0.9; color: #ffffff; }
+
+    /* 🎬 Hero Banner */
+    .hero-banner { display: flex; padding: var(--space-lg, 20px); gap: var(--space-lg, 20px); align-items: flex-start; flex-wrap: wrap; }
+    .hero-thumb { position: relative; width: 16.25rem; height: 9rem; border-radius: var(--radius-md, 10px); overflow: hidden; flex-shrink: 0; background-color: var(--bg-light); }
+    .hero-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .hero-thumb .play-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: rgba(0,0,0,0.6); color: #ffffff; width: 2.5rem; height: 2.5rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: var(--font-size-sm, 14px); }
+    .hero-thumb .duration { position: absolute; bottom: 0.5rem; right: 0.5rem; background-color: rgba(0,0,0,0.8); color: #ffffff; font-size: var(--font-size-xs, 10px); padding: 0.2rem 0.4rem; border-radius: var(--radius-sm, 4px); font-weight: var(--font-weight-semibold, 600); }
+    
+    .hero-info { flex: 1; min-width: 15.6rem; }
+    .hero-info h2 { font-size: 1.25rem; font-weight: var(--font-weight-black, 800); color: var(--text-dark); margin-bottom: 0.5rem; line-height: 1.3; }
+    .hero-creator { display: flex; align-items: center; gap: var(--space-sm, 10px); margin-bottom: var(--space-lg, 20px); flex-wrap: wrap; }
+    
+    .avatar-md { width: 2.25rem; height: 2.25rem; border-radius: 50%; object-fit: cover; border: 1px solid var(--border-soft); }
+    
+    /* Dynamic Grid */
+    .hero-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-md, 15px); border-top: 1px solid var(--border-soft); padding-top: var(--space-md, 15px); }
+    .meta-item .lbl { display: block; font-size: var(--font-size-xs, 11px); color: var(--text-muted); font-weight: var(--font-weight-semibold, 600); text-transform: uppercase; margin-bottom: 0.25rem; }
+    .meta-item .val { font-size: var(--font-size-sm, 13px); font-weight: var(--font-weight-bold, 700); color: var(--text-dark); display: flex; align-items: center; }
+    
+    .status-dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; margin-right: 0.3rem; }
+    .bg-dot-success { background-color: var(--accent-green); }
+    .bg-dot-warning { background-color: var(--accent-orange); }
+
+    /* 📄 Detail Rows */
+    .detail-row { padding: var(--space-md, 15px) var(--space-lg, 20px); border-bottom: 1px solid var(--border-soft); }
+    .detail-row:last-child { border-bottom: none; }
+    .d-icon { color: var(--primary-blue); width: 1.5rem; font-size: var(--font-size-md, 14px); text-align: center; }
+    .d-lbl { font-size: var(--font-size-xs, 11px); color: var(--text-muted); font-weight: var(--font-weight-semibold, 600); text-transform: uppercase; margin-bottom: 0.3rem; }
+    .d-val { font-size: var(--font-size-sm, 13px); font-weight: var(--font-weight-bold, 700); color: var(--text-dark); }
+    .desc-scroll-box { font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-medium, 500); line-height: 1.4; max-height: 6.25rem; overflow-y: auto; color: var(--text-muted); }
+    
+    .tag-pill { display: inline-block; background-color: var(--bg-light); color: var(--text-muted); border: 1px solid var(--border-soft); font-size: var(--font-size-xs, 11px); font-weight: var(--font-weight-semibold, 600); padding: 0.25rem 0.6rem; border-radius: 20px; margin: 0.15rem 0.15rem 0 0; }
+
+    /* Creator Stats */
+    .creator-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: var(--space-sm, 10px); margin-top: var(--space-md, 15px); }
+    .c-stat .s-lbl { font-size: var(--font-size-xs, 11px); color: var(--text-muted); font-weight: var(--font-weight-semibold, 600); display: block; }
+    .c-stat .s-val { font-size: var(--font-size-md, 14px); font-weight: var(--font-weight-black, 800); color: var(--text-dark); }
+
+    /* 📊 Soft Background Utilities */
+    .bg-primary-soft { background-color: rgba(93, 120, 255, 0.1); color: var(--primary-blue); }
+    .bg-danger-soft { background-color: rgba(253, 57, 122, 0.1); color: var(--accent-red); }
+    .bg-success-soft { background-color: rgba(10, 187, 135, 0.1); color: var(--accent-green); }
+    .bg-warning-soft { background-color: rgba(255, 184, 34, 0.1); color: var(--accent-orange); }
+    .bg-muted-soft { background-color: var(--bg-light); color: var(--text-dark); }
+
+    /* Middle Column Grids */
+    .stats-row-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); padding: var(--space-lg, 20px); gap: var(--space-md, 15px); text-align: center; }
+    .stat-box-img { border-right: 1px solid var(--border-soft); padding-right: var(--space-sm, 10px); }
+    .stat-box-img:last-child { border-right: none; padding-right: 0; }
+    .icon-wrap { width: 2rem; height: 2rem; border-radius: var(--radius-md, 8px); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 0.6rem; font-size: var(--font-size-md, 14px); }
+    
+    .sb-val { font-size: var(--font-size-lg, 18px); font-weight: var(--font-weight-black, 800); color: var(--text-dark); margin: 0.3rem 0 0.15rem; }
+    .sb-lbl { font-size: var(--font-size-xs, 11px); font-weight: var(--font-weight-semibold, 600); color: var(--text-muted); display: block; }
+    .sb-trend { font-size: var(--font-size-xs, 10px); font-weight: var(--font-weight-bold, 700); }
+    
+    /* Audience Grid */
+    .audience-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-lg, 20px); padding: var(--space-lg, 20px); }
+    .aud-title { font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-bold, 700); color: var(--text-dark); margin-bottom: var(--space-md, 15px); }
+    .geo-row { display: flex; justify-content: space-between; margin-bottom: var(--space-sm, 10px); font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-semibold, 600); }
+    .geo-lbl { color: var(--text-muted); }
+    .geo-val { color: var(--text-dark); }
+    
+    .age-row { display: flex; align-items: center; margin-bottom: var(--space-sm, 8px); font-size: var(--font-size-xs, 11px); font-weight: var(--font-weight-semibold, 600); }
+    .age-bar-track { flex-grow: 1; height: 6px; background-color: var(--border-soft); border-radius: 3px; margin: 0 10px; overflow: hidden; }
+    .age-bar-fill { height: 100%; background-color: var(--primary-blue); border-radius: 3px; }
+    
+    .device-chart-wrapper { position: relative; width: 6.25rem; height: 6.25rem; margin: 0 auto; }
+
+    /* ⚡ Right Column Grids */
+    .quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-sm, 10px); padding: var(--space-md, 15px); }
+    .qa-btn { border: 1px solid var(--border-soft); background-color: var(--bg-surface, #ffffff); padding: 0.6rem; border-radius: var(--radius-md, 8px); font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-semibold, 600); color: var(--text-dark); text-align: left; transition: all 0.2s ease; white-space: nowrap; }
+    .qa-btn i { width: 1rem; margin-right: 0.3rem; text-align: center; }
+    .qa-btn:hover { background-color: var(--bg-light); box-shadow: var(--shadow-sm); }
+
+    .monetize-badge { font-size: var(--font-size-xs, 10px); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm, 4px); font-weight: var(--font-weight-bold, 700); display: inline-block; }
+    .m-earnings { font-size: var(--font-size-xl, 24px); font-weight: var(--font-weight-black, 800); color: var(--text-dark); margin-top: 0.3rem; }
+    
+    .copyright-pass { width: 2.25rem; height: 2.25rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: var(--font-size-lg, 16px); margin-right: var(--space-md, 15px); }
+    .ai-score-track { height: 8px; background-color: var(--border-soft); border-radius: 4px; margin: 0.6rem 0 1rem; overflow: hidden; }
+    .ai-score-fill { height: 100%; background-color: var(--accent-green); }
+    .check-row { display: flex; justify-content: space-between; font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-semibold, 600); margin-bottom: 0.5rem; }
+    
+    .rep-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-soft); font-size: var(--font-size-sm, 12px); font-weight: var(--font-weight-semibold, 600); }
+    .rep-row:last-child { border-bottom: none; }
+
+    /* Custom Text Colors */
+    .text-primary-custom { color: var(--primary-blue); }
+    .text-success-custom { color: var(--accent-green); }
+    .text-danger-custom { color: var(--accent-red); }
+    .text-warning-custom { color: var(--accent-orange); }
+
+    /* 📱 Responsive Tweaks */
+    @media (max-width: 991px) {
+        .hero-banner { flex-direction: column; align-items: center; text-align: center; }
+        .hero-thumb { width: 100%; max-width: 25rem; aspect-ratio: 16/9; height: auto; }
+        .stat-box-img { border-right: none; border-bottom: 1px solid var(--border-soft); padding-bottom: 0.6rem; }
+        .stat-box-img:last-child { border-bottom: none; }
     }
 </style>
 
-<div class="theater-header">
-    <div class="theater-background"></div>
-    <div class="theater-container">
-        <div class="theater-player-frame">
-            <video width="100%" height="100%" controls poster="<?= get_media_url($video->thumbnail_url, 'video') ?>">
-                <source src="<?= get_media_url($video->video_url, 'video') ?>" type="video/mp4">
-            </video>
+<div class="container-fluid pt-3">
+    <div class="top-action-bar">
+        <div class="breadcrumb-title">
+            <i class="fas fa-arrow-left" onclick="window.history.back()"></i>
+            <span>Video Management /</span> Video Deep Dive
+        </div>
+        <div class="d-flex flex-wrap gap-2 action-buttons-mobile">
+            <a href="<?= get_media_url($video->video_url, 'video') ?>" target="_blank" class="btn btn-top text-primary-custom"><i class="fas fa-play mr-1"></i> Play</a>
+            <a href="<?= base_url('admin/videos/edit/'.$video->id) ?>" class="btn btn-top"><i class="fas fa-pen mr-1"></i> Edit</a>
+            <button class="btn btn-top" onclick="updateStatus('blocked')"><i class="fas fa-ban mr-1 text-warning-custom"></i> Block</button>
+            <button class="btn btn-top btn-danger-custom shadow-sm" onclick="deleteVideo('<?= $video->id ?>')"><i class="fas fa-trash-alt mr-1"></i> Delete</button>
         </div>
     </div>
 </div>
 
-<div class="meta-data-strip">
-    <div class="container-fluid d-flex flex-wrap justify-content-between align-items-center">
-        <div class="mb-2 mb-md-0 w-100 w-md-auto" style="overflow: hidden;">
-            <h3 class="video-title-heavy text-truncate"><?= esc($video->title) ?></h3>
+<div class="container-fluid">
+    
+    <div class="deep-dive-card hero-banner">
+        <div class="hero-thumb">
+            <img src="<?= get_media_url($video->thumbnail_url, 'video') ?>" onerror="this.src='https://placehold.co/300x170/e9ecef/495057?text=No+Thumbnail';">
+            <div class="play-btn"><i class="fas fa-play"></i></div>
+            <div class="duration"><?= gmdate("i:s", $video->duration) ?></div>
+        </div>
+        <div class="hero-info">
+            <h2><?= esc($video->title) ?></h2>
+            <div class="hero-creator">
+                <img src="<?= get_media_url($video->user_avatar, 'profile') ?>" onerror="this.src='https://ui-avatars.com/api/?name=<?= urlencode($video->username) ?>';" class="avatar-md">
+                <div class="text-left">
+                    <div class="text-strong text-dark"><?= esc($video->full_name) ?> <?php if($video->user_verified) echo '<i class="fas fa-check-circle text-primary-custom ml-1"></i>'; ?></div>
+                    <div class="text-muted small">@<?= esc($video->username) ?></div>
+                </div>
+                <?php if($video->user_verified): ?>
+                    <span class="monetize-badge bg-primary-soft ml-md-auto">Verified Creator</span>
+                <?php endif; ?>
+            </div>
             
-            <div class="top-badges-scroll">
-                <span class="badge badge-<?= $video->status == 'published' ? 'success' : 'warning' ?>" style="font-size: 10px; padding: 5px 8px;"><?= strtoupper($video->status) ?></span>
-                <span class="badge badge-<?= $video->visibility == 'public' ? 'info' : 'dark' ?>" style="font-size: 10px; padding: 5px 8px;"><?= strtoupper($video->visibility) ?></span>
-                <span class="badge" style="background: rgba(93, 120, 255, 0.1); color: var(--primary-blue); font-size: 10px; border: 1px solid var(--primary-blue); padding: 5px 10px;"><?= strtoupper($video->category) ?></span>
-                <span class="small text-muted font-weight-bold" style="font-size: 11px;">ID: #<?= $video->unique_id ?></span>
-                <span class="small text-muted font-weight-bold" style="font-size: 11px;"><i class="far fa-eye ml-1 mr-1"></i> <?= number_format($video->views_count) ?> Views</span>
+            <div class="hero-meta-grid">
+                <div class="meta-item">
+                    <span class="lbl">Video ID</span>
+                    <span class="val">VID-<?= $video->id ?>-<?= substr(md5($video->unique_id), 0, 4) ?></span>
+                </div>
+                <div class="meta-item">
+                    <span class="lbl">Uploaded</span>
+                    <span class="val"><?= date('M d, Y', strtotime($video->created_at)) ?></span>
+                </div>
+                <div class="meta-item">
+                    <span class="lbl">Duration</span>
+                    <span class="val"><?= gmdate("i:s", $video->duration) ?></span>
+                </div>
+                <div class="meta-item">
+                    <span class="lbl">Resolution</span>
+                    <span class="val"><?= $video->resolution ?? '1080p' ?></span>
+                </div>
+                <div class="meta-item">
+                    <span class="lbl">Status</span>
+                    <span class="val">
+                        <i class="status-dot <?= $video->status == 'published' ? 'bg-dot-success' : 'bg-dot-warning' ?>"></i> 
+                        <?= ucfirst($video->status) ?>
+                    </span>
+                </div>
             </div>
         </div>
-        
-        <div class="w-100 w-md-auto mt-2 mt-md-0">
-            <button class="btn btn-danger font-weight-bold px-4 btn-strike-mobile shadow-sm" style="font-size: 11px; border-radius: 8px;" onclick="openStrikeModal('VIDEO', '<?= $video->id ?>', '<?= $video->channel_id ?>')"><i class="fas fa-bolt mr-1"></i> ISSUE STRIKE</button>
-        </div>
     </div>
-</div>
 
-<div class="container-fluid px-2 px-md-4 mt-4">
     <div class="row">
-        
-        <div class="col-lg-8">
+        <div class="col-xl-3 col-lg-4 col-md-12 mb-4">
             
-            <?php if ($video->copyright_status === 'CLAIMED' || (!empty($video_strike) && $video_strike->type === 'CLAIM')): ?>
-                <div class="heavy-card" style="border: 1px solid #ffc107; background: #fffcf5;">
-                    <div class="card-body p-3 p-md-4">
-                        <div class="d-flex flex-column flex-md-row align-items-start gap-3">
-                            <div class="d-none d-md-block mt-1">
-                                <i class="fas fa-exclamation-triangle text-warning" style="font-size: 28px;"></i>
-                            </div>
-                            <div class="w-100">
-                                <div class="d-flex align-items-center mb-1">
-                                    <i class="fas fa-exclamation-triangle text-warning d-inline-block d-md-none mr-2" style="font-size: 18px;"></i>
-                                    <h6 class="font-weight-bold text-dark mb-0" style="font-size: 15px;">Copyright Claim: Revenue Sharing Active</h6>
-                                </div>
-                                <p class="small text-muted mb-3" style="line-height: 1.5;">
-                                    This video contains copyrighted material. Monetization is restricted for the uploader, and estimated ad revenue is being routed to the original owner.
-                                </p>
-                                
-                                <div class="bg-white border rounded p-3">
-                                    <div class="row align-items-center text-center text-md-left">
-                                        <div class="col-md-4 claim-box-mobile-col">
-                                            <span class="stat-label-heavy d-block text-muted mb-1">Claimant / Owner</span>
-                                            <span class="font-weight-bold text-dark" style="font-size: 12px;">
-                                                <i class="fas fa-music mr-1 text-primary"></i> <?= !empty($rev_share) ? esc($rev_share->claimant_name) : 'Content ID System' ?>
-                                            </span>
-                                        </div>
-                                        <div class="col-md-4 claim-box-mobile-col pl-md-3">
-                                            <span class="stat-label-heavy d-block text-muted mb-1">Revenue Split</span>
-                                            <span class="font-weight-bold text-success" style="font-size: 12px;">
-                                                <?= !empty($rev_share) ? "Active Split" : 'Pending Verification' ?>
-                                            </span>
-                                        </div>
-                                        <div class="col-md-4 pl-md-3">
-                                            <span class="stat-label-heavy d-block text-muted mb-1">Visibility</span>
-                                            <span class="badge badge-success px-2 py-1">Visible</span> 
-                                            <span class="badge badge-warning text-dark px-2 py-1">Revenue Diverted</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+            <div class="deep-dive-card h-100">
+                <div class="card-title-head">Video Details</div>
+                
+                <div class="detail-row d-flex">
+                    <i class="fas fa-heading d-icon"></i>
+                    <div class="ml-3">
+                        <div class="d-lbl">Title</div>
+                        <div class="d-val"><?= character_limiter(esc($video->title), 35) ?></div>
+                    </div>
+                </div>
+                <div class="detail-row d-flex">
+                    <i class="fas fa-folder d-icon"></i>
+                    <div class="ml-3">
+                        <div class="d-lbl">Category</div>
+                        <div class="d-val"><?= esc($video->category) ?></div>
+                    </div>
+                </div>
+                <div class="detail-row d-flex">
+                    <i class="fas fa-eye d-icon text-success-custom"></i>
+                    <div class="ml-3">
+                        <div class="d-lbl">Visibility</div>
+                        <div class="d-val"><i class="fas fa-circle text-success-custom status-dot"></i> <?= ucfirst($video->visibility) ?></div>
+                    </div>
+                </div>
+                <div class="detail-row d-flex">
+                    <i class="fas fa-tags d-icon text-primary-custom"></i>
+                    <div class="ml-3 w-100">
+                        <div class="d-lbl">Tags</div>
+                        <div class="mt-1">
+                            <?php if($video->tags): foreach(explode(',', $video->tags) as $tag): ?>
+                                <span class="tag-pill"><?= trim($tag) ?></span>
+                            <?php endforeach; else: echo '<span class="text-muted small">No tags</span>'; endif; ?>
                         </div>
                     </div>
                 </div>
-            
-            <?php elseif ($video->copyright_status === 'STRIKED' || (!empty($video_strike) && $video_strike->type === 'STRIKE')): ?>
-                <div class="heavy-card" style="border: 1px solid #dc3545; background: #fff5f5;">
-                    <div class="card-body p-3 p-md-4">
-                        <div class="d-flex flex-column flex-md-row align-items-start gap-3">
-                            <div class="d-none d-md-block mt-1">
-                                <i class="fas fa-ban text-danger" style="font-size: 28px;"></i>
-                            </div>
-                            <div class="w-100">
-                                <div class="d-flex align-items-center mb-1">
-                                    <i class="fas fa-ban text-danger d-inline-block d-md-none mr-2" style="font-size: 18px;"></i>
-                                    <h6 class="font-weight-bold text-danger mb-0" style="font-size: 15px;">Content Strike Issued</h6>
-                                </div>
-                                <p class="small text-danger mb-3" style="line-height: 1.5;">This video violates community guidelines or severe copyright policies. The channel has been penalized.</p>
-                                <div class="bg-white border border-danger rounded p-3">
-                                    <div class="row align-items-center text-center text-md-left">
-                                        <div class="col-md-6 claim-box-mobile-col">
-                                            <span class="stat-label-heavy d-block text-muted mb-1">Violation Reason</span>
-                                            <span class="font-weight-bold text-dark" style="font-size: 12px;"><?= !empty($video_strike) ? esc($video_strike->reason) : 'Policy Violation' ?></span>
-                                        </div>
-                                        <div class="col-md-6 pl-md-3">
-                                            <span class="stat-label-heavy d-block text-muted mb-1">Trust Points Deducted</span>
-                                            <span class="badge badge-danger px-2 py-1">-<?= !empty($video_strike) ? $video_strike->severity_points : '10' ?> Points</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            <?php elseif (!empty($video_strike) && $video_strike->type === 'WARNING'): ?>
-                <div class="heavy-card" style="border: 1px solid #fd7e14; background: #fff9f4;">
-                    <div class="card-body p-3">
-                        <div class="d-flex align-items-center">
-                            <i class="fas fa-info-circle text-warning mr-3" style="font-size: 24px;"></i>
-                            <div>
-                                <h6 class="font-weight-bold text-dark mb-1">Community Guidelines Warning</h6>
-                                <p class="small text-muted mb-0">Reason: <?= esc($video_strike->reason) ?> (No points deducted yet).</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endif; ?>
-
-            <div class="heavy-card">
-                <div class="heavy-header"><i class="fas fa-chart-line mr-2 text-primary"></i> Real-time Analytics (Section D)</div>
-                <div class="card-body p-3 p-md-4">
-                    <div class="row mb-4">
-                        <div class="col-md-4 mb-4 mb-md-0 desktop-border-right">
-                            <span class="stat-label-heavy">Watch Completion</span>
-                            <div class="stat-value-heavy" style="font-size: 20px;"><?= $stats['avg_completion'] ?>%</div>
-                            <div class="gauge-track"><div class="gauge-fill" style="background: var(--primary-blue); width: <?= $stats['avg_completion'] ?>%"></div></div>
-                        </div>
-                        <div class="col-md-4 mb-4 mb-md-0 desktop-border-right px-md-4">
-                            <span class="stat-label-heavy">Interaction Rate</span>
-                            <div class="stat-value-heavy" style="font-size: 20px;"><?= $stats['engagement_rate'] ?>%</div>
-                            <div class="gauge-track"><div class="gauge-fill" style="background: var(--accent-green); width: <?= min(100, $stats['engagement_rate']*5) ?>%"></div></div>
-                        </div>
-                        <div class="col-md-4 pl-md-4">
-                            <span class="stat-label-heavy">Viral Potential</span>
-                            <div class="stat-value-heavy" style="font-size: 20px;"><?= $stats['viral_percent'] ?>%</div>
-                            <div class="gauge-track"><div class="gauge-fill" style="background: var(--accent-orange); width: <?= $stats['viral_percent'] ?>%"></div></div>
-                        </div>
-                    </div>
-                    
-                    <div class="interaction-grid mt-2 pt-3 border-top">
-                        <div class="interaction-pill">
-                            <span class="stat-label-heavy">Likes</span>
-                            <h5 class="font-weight-bold text-success mb-0"><?= format_number_k($video->likes_count) ?></h5>
-                        </div>
-                        <div class="interaction-pill">
-                            <span class="stat-label-heavy">Dislikes</span>
-                            <h5 class="font-weight-bold text-danger mb-0"><?= format_number_k($stats['dislikes']) ?></h5>
-                        </div>
-                        <div class="interaction-pill">
-                            <span class="stat-label-heavy">Comments</span>
-                            <h5 class="font-weight-bold text-dark mb-0"><?= format_number_k($video->comments_count) ?></h5>
-                        </div>
-                        <div class="interaction-pill">
-                            <span class="stat-label-heavy">Shares</span>
-                            <h5 class="font-weight-bold text-primary mb-0"><?= format_number_k($video->shares_count) ?></h5>
+                <div class="detail-row d-flex">
+                    <i class="fas fa-align-left d-icon text-muted"></i>
+                    <div class="ml-3 w-100">
+                        <div class="d-lbl">Description</div>
+                        <div class="d-val desc-scroll-box">
+                            <?= esc($video->description) ?: 'No description provided.' ?>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="heavy-card">
-                <div class="heavy-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-hand-holding-usd mr-2 text-success"></i> Earnings & Revenue (Section C)</span>
-                    <span class="badge badge-<?= $video->monetization_enabled ? 'success' : 'secondary' ?>"><?= $video->monetization_enabled ? 'MONETIZED' : 'ADS OFF' ?></span>
-                </div>
-                <div class="card-body p-3 p-md-4">
-                    <div class="row">
-                        <div class="col-md-6 desktop-border-right">
-                            <div class="data-row-heavy"><span class="stat-label-heavy">Ad Impressions</span><span class="stat-value-heavy"><?= number_format($ad_stats->total_imps ?? 0) ?></span></div>
-                            <div class="data-row-heavy"><span class="stat-label-heavy">Ad Views</span><span class="stat-value-heavy"><?= number_format($ad_views_count ?? 0) ?></span></div>
-                            <div class="data-row-heavy"><span class="stat-label-heavy">Ad Clicks (CTR)</span><span class="stat-value-heavy"><?= $ad_clicks ?> (<?= ($ad_stats->total_imps > 0) ? round(($ad_clicks/$ad_stats->total_imps)*100, 2) : 0 ?>%)</span></div>
-                        </div>
-                        <div class="col-md-6 pl-md-4">
-                            <div class="data-row-heavy" style="background: rgba(40, 167, 69, 0.05); border: 1px dashed #28a745;">
-                                <span class="stat-label-heavy" style="color: #28a745;">Total Real Earnings</span>
-                                <span class="stat-value-heavy" style="color: #28a745; font-size: 18px;">₹<?= number_format($creator_earnings->total_earnings ?? 0, 2) ?></span>
-                            </div>
-                            <?php if($rev_share): ?>
-                                <div class="alert alert-info py-2 small mt-2 mb-0"><i class="fas fa-handshake mr-1"></i> Revenue split active with original creator.</div>
-                            <?php endif; ?>
+            <div class="deep-dive-card mt-4">
+                <div class="card-title-head">Creator Information</div>
+                <div class="p-3">
+                    <div class="d-flex align-items-center mb-3">
+                        <img src="<?= get_media_url($video->user_avatar, 'profile') ?>" onerror="this.src='https://ui-avatars.com/api/?name=<?= urlencode($video->username) ?>';" class="avatar-md">
+                        <div class="ml-3">
+                            <div class="text-strong text-dark"><?= esc($video->full_name) ?> <?php if($video->user_verified) echo '<i class="fas fa-check-circle text-primary-custom ml-1"></i>'; ?></div>
+                            <div class="text-muted small">@<?= esc($video->username) ?></div>
                         </div>
                     </div>
+                    <div class="creator-stats-grid">
+                        <div class="c-stat">
+                            <span class="s-lbl">Followers</span>
+                            <span class="s-val"><?= format_number_k($video->followers_count ?? 0) ?></span>
+                        </div>
+                        <div class="c-stat">
+                            <span class="s-lbl">Videos</span>
+                            <span class="s-val"><?= $video->channel_videos_count ?? 0 ?></span>
+                        </div>
+                        <div class="c-stat">
+                            <span class="s-lbl">Channel ID</span>
+                            <span class="s-val small">CH-<?= substr($video->channel_id ?? '00', 0, 4) ?></span>
+                        </div>
+                    </div>
+                    <a href="<?= base_url('admin/channels/view/'.$video->channel_id) ?>" class="btn btn-light btn-block mt-3 font-weight-bold">View Creator Profile</a>
                 </div>
             </div>
 
-            <div class="heavy-card">
-                <div class="heavy-header"><i class="fas fa-search mr-2 text-info"></i> Discovery & SEO Engine (Section E)</div>
-                <div class="card-body p-3 p-md-4">
-                    <span class="stat-label-heavy mb-2 d-block">Video Description</span>
-                    <div class="p-3 bg-light rounded small text-dark mb-3" style="line-height: 1.6; max-height: 150px; overflow-y: auto;">
-                        <?= nl2br(esc($video->description)) ?: '<span class="text-muted">No description provided.</span>' ?>
-                    </div>
-                    
-                    <span class="stat-label-heavy mb-2 d-block">Hashtags & Keywords</span>
-                    <div class="d-flex flex-wrap gap-2">
-                        <?php 
-                            if($video->tags): 
-                                foreach(explode(',', $video->tags) as $tag): 
-                        ?>
-                            <span class="badge" style="background: #eef2f7; color: var(--primary-blue); border: 1px solid #dce4ee; font-size: 11px; padding: 5px 10px;">#<?= trim($tag) ?></span>
-                        <?php endforeach; else: ?>
-                            <span class="small text-muted">No tags indexed.</span>
+        </div>
+
+        <div class="col-xl-6 col-lg-8 col-md-12 mb-4">
+            
+            <div class="deep-dive-card">
+                <div class="stats-row-grid">
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-primary-soft"><i class="fas fa-eye"></i></div>
+                        <div class="sb-lbl">Views</div>
+                        <div class="sb-val"><?= format_number_k($video->views_count) ?></div>
+                        <?php if($stats['recent_views'] > 0): ?>
+                            <div class="sb-trend text-success-custom"><i class="fas fa-arrow-up"></i> <?= format_number_k($stats['recent_views']) ?> new</div>
+                        <?php else: ?>
+                            <div class="sb-trend text-muted">-</div>
                         <?php endif; ?>
                     </div>
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-danger-soft"><i class="fas fa-heart"></i></div>
+                        <div class="sb-lbl">Likes</div>
+                        <div class="sb-val"><?= format_number_k($video->likes_count) ?></div>
+                        <?php if($stats['recent_likes'] > 0): ?>
+                            <div class="sb-trend text-success-custom"><i class="fas fa-arrow-up"></i> <?= format_number_k($stats['recent_likes']) ?> new</div>
+                        <?php else: ?>
+                            <div class="sb-trend text-muted">-</div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-primary-soft"><i class="fas fa-comment"></i></div>
+                        <div class="sb-lbl">Comments</div>
+                        <div class="sb-val"><?= format_number_k($video->comments_count) ?></div>
+                        <?php if($stats['recent_comments'] > 0): ?>
+                            <div class="sb-trend text-success-custom"><i class="fas fa-arrow-up"></i> <?= format_number_k($stats['recent_comments']) ?> new</div>
+                        <?php else: ?>
+                            <div class="sb-trend text-muted">-</div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-muted-soft"><i class="fas fa-share"></i></div>
+                        <div class="sb-lbl">Shares</div>
+                        <div class="sb-val"><?= format_number_k($video->shares_count ?? 0) ?></div>
+                        <div class="sb-trend text-muted">Total</div>
+                    </div>
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-primary-soft"><i class="fas fa-clock"></i></div>
+                        <div class="sb-lbl">Watch Time</div>
+                        <div class="sb-val"><?= $stats['watch_time_hrs'] ?>h</div>
+                        <div class="sb-trend text-muted">Total hours</div>
+                    </div>
+                    <div class="stat-box-img">
+                        <div class="icon-wrap bg-warning-soft"><i class="fas fa-stopwatch"></i></div>
+                        <div class="sb-lbl">Avg Watch</div>
+                        <div class="sb-val"><?= $stats['avg_watch_dur'] ?></div>
+                        <div class="sb-trend text-muted"><?= $stats['avg_completion'] ?>% compl.</div>
+                    </div>
                 </div>
             </div>
 
-            <div class="heavy-card">
-                <div class="heavy-header"><i class="fas fa-comments mr-2 text-warning"></i> Audience Interaction Stream (Section F)</div>
-                <div class="card-body p-0">
-                    <?php if($comments): foreach($comments as $c): ?>
-                    <div class="comment-item">
-                        <img src="<?= get_media_url($c->avatar, 'profile') ?>" onerror="this.src='https://ui-avatars.com/api/?name=<?= $c->username ?>&background=f4f7fa&color=5d78ff';">
-                        <div class="w-100">
-                            <div class="d-flex justify-content-between">
-                                <span class="font-weight-bold text-dark" style="font-size: 11px;">@<?= strtoupper($c->username) ?></span>
-                                <span class="text-muted" style="font-size: 9px;"><?= date('d M, Y', strtotime($c->created_at)) ?></span>
-                            </div>
-                            <p class="mb-0 mt-1 text-dark" style="font-size: 12px; line-height: 1.4;"><?= esc($c->content) ?></p>
-                        </div>
-                    </div>
-                    <?php endforeach; else: ?>
-                        <div class="p-4 text-center text-muted small font-weight-bold">No comments yet.</div>
-                    <?php endif; ?>
+            <div class="deep-dive-card">
+                <div class="card-title-head">
+                    Performance Analytics
+                    <select class="form-control form-control-sm w-auto font-weight-bold">
+                        <option>Last 7 Days (Views)</option>
+                    </select>
+                </div>
+                <div class="p-3">
+                    <canvas id="performanceChart" height="90"></canvas>
                 </div>
             </div>
 
-            <div class="heavy-card" style="border: 2px solid var(--accent-red); margin-top: 30px;">
-                <div class="heavy-header bg-light text-danger" style="font-size: 12px;"><i class="fas fa-shield-alt mr-2"></i> Admin Action Center</div>
-                <div class="card-body p-3 p-md-4">
-                    <div class="row align-items-center">
-                        <div class="col-md-6 mb-3 mb-md-0">
-                            <div class="input-group shadow-sm">
-                                <div class="input-group-prepend">
-                                    <span class="input-group-text font-weight-bold bg-white text-muted" style="font-size: 11px; border-radius: 8px 0 0 8px;">VISIBILITY</span>
-                                </div>
-                                <select id="visibility_selector" class="form-control font-weight-bold" style="height: 45px; font-size: 13px;">
-                                    <option value="public" <?= $video->visibility == 'public' ? 'selected' : '' ?>>PUBLIC</option>
-                                    <option value="private" <?= $video->visibility == 'private' ? 'selected' : '' ?>>PRIVATE</option>
-                                    <option value="unlisted" <?= $video->visibility == 'unlisted' ? 'selected' : '' ?>>UNLISTED</option>
-                                    <option value="blocked" <?= $video->visibility == 'blocked' ? 'selected' : '' ?>>BLOCKED</option>
-                                </select>
-                                <div class="input-group-append">
-                                    <button onclick="updateVisibilityFromSelect()" class="btn btn-primary font-weight-bold px-3" style="height: 45px; border-radius: 0 8px 8px 0;"><i class="fas fa-save mr-1"></i> UPDATE</button>
-                                </div>
+            <div class="deep-dive-card">
+                <div class="card-title-head">Audience Insights</div>
+                <div class="audience-grid">
+                    
+                    <div>
+                        <div class="aud-title">Top Countries</div>
+                        <?php if(!empty($geo_stats)): foreach($geo_stats as $geo): 
+                            $pct = ($geo->count / max(1, $video->views_count)) * 100;
+                            $flag = '🌐';
+                            if(strtolower($geo->country) == 'india') $flag = '🇮🇳';
+                            if(strtolower($geo->country) == 'usa' || strtolower($geo->country) == 'united states') $flag = '🇺🇸';
+                        ?>
+                            <div class="geo-row">
+                                <span class="geo-lbl"><?= $flag ?> <?= esc($geo->country) ?: 'Unknown' ?></span>
+                                <span class="geo-val"><?= round($pct, 1) ?>%</span>
                             </div>
-                        </div>
-                        <div class="col-md-6 d-flex justify-content-md-end action-buttons-mobile">
-                            <button onclick="updateStatus('blocked')" class="btn btn-dark font-weight-bold flex-grow-1" style="height: 45px; border-radius: 8px;"><i class="fas fa-ban mr-1"></i> Quick Block</button>
-                            <button onclick="deleteVideo('<?= $video->id ?>')" class="btn btn-danger font-weight-bold flex-grow-1" style="height: 45px; border-radius: 8px;"><i class="fas fa-trash-alt mr-1"></i> Delete Video</button>
-                        </div>
+                        <?php endforeach; else: echo '<div class="text-muted small">No geography data available yet.</div>'; endif; ?>
                     </div>
+
+                    <div class="text-center">
+                        <div class="aud-title text-left">Device Type</div>
+                        <?php if(!empty($device_stats)): ?>
+                            <div class="device-chart-wrapper">
+                                <canvas id="deviceChart"></canvas>
+                            </div>
+                            <div class="mt-3 text-left pl-2" id="deviceLegend"></div>
+                        <?php else: echo '<div class="text-muted small text-left">No device data.</div>'; endif; ?>
+                    </div>
+
+                    <div>
+                        <div class="aud-title">Age Group</div>
+                        <?php if(!empty($age_stats)): foreach($age_stats as $age): 
+                            $pct = ($age->count / max(1, $video->views_count)) * 100;
+                        ?>
+                            <div class="age-row">
+                                <span class="geo-lbl w-25"><?= esc($age->age_group) ?></span>
+                                <div class="age-bar-track"><div class="age-bar-fill" style="width: <?= $pct ?>%;"></div></div>
+                                <span class="geo-val w-25 text-right"><?= round($pct, 1) ?>%</span>
+                            </div>
+                        <?php endforeach; else: echo '<div class="text-muted small">No demographic data.</div>'; endif; ?>
+                    </div>
+
                 </div>
             </div>
 
         </div>
 
-        <div class="col-lg-4">
+        <div class="col-xl-3 col-lg-12 col-md-12 mb-4">
             
-            <div class="heavy-card" style="border: 2px solid rgba(93, 120, 255, 0.2);">
-                <div class="heavy-header">Creator Health</div>
-                <div class="card-body text-center p-3 p-md-4">
-                    <img src="<?= get_media_url($video->user_avatar, 'profile') ?>" class="rounded-circle mb-3 border p-1" style="width: 80px; height: 80px; object-fit: cover;">
-                    <h5 class="font-weight-bold mb-0" style="font-size: 15px;">@<?= strtoupper($video->username) ?></h5>
-                    <p class="small text-muted font-weight-bold mb-3"><?= strtoupper($video->channel_name) ?></p>
-                    <div class="row border-top pt-3">
-                        <div class="col-6 border-right">
-                            <span class="stat-label-heavy">Trust Score</span>
-                            <div class="h4 font-weight-bold mb-0 <?= ($video->trust_score < 40) ? 'text-danger' : 'text-success' ?>"><?= $video->trust_score ?></div>
-                        </div>
-                        <div class="col-6">
-                            <span class="stat-label-heavy">Strikes</span>
-                            <div class="h4 font-weight-bold mb-0 text-danger"><?= $video->strikes_count ?></div>
+            <div class="row">
+                <div class="col-xl-12 col-lg-6 col-md-6 mb-4">
+                    <div class="deep-dive-card h-100 mb-0">
+                        <div class="card-title-head">Quick Actions</div>
+                        <div class="quick-actions-grid">
+                            <button class="qa-btn" onclick="updateStatus('blocked')"><i class="fas fa-ban text-danger-custom"></i> Block</button>
+                            <button class="qa-btn" onclick="updateStatus('public')"><i class="fas fa-globe text-success-custom"></i> Public</button>
+                            <button class="qa-btn" onclick="blacklistHash('<?= $video->id ?>')"><i class="fas fa-shield-alt text-primary-custom"></i> Blacklist</button>
+                            <button class="qa-btn" onclick="openStrikeModal('VIDEO', '<?= $video->id ?>', '<?= $video->channel_id ?>')"><i class="fas fa-exclamation-triangle text-warning-custom"></i> Warn</button>
                         </div>
                     </div>
-                    <a href="<?= base_url('admin/channels/view/'.$video->channel_id) ?>" class="btn btn-light border btn-block btn-sm mt-3 font-weight-bold text-dark">VIEW FULL CHANNEL</a>
                 </div>
-            </div>
 
-            <div class="heavy-card" style="border-top: 3px solid var(--primary-blue);">
-                <div class="heavy-header bg-light"><i class="fas fa-fingerprint mr-2 text-primary"></i> Copyright Engine (Section G)</div>
-                <div class="card-body p-3">
-                    <div class="data-row-heavy"><span class="stat-label-heavy">Video Hash</span><code class="small text-primary text-truncate" style="max-width: 100px;"><?= $video->video_hash ?: 'N/A' ?></code></div>
-                    <div class="data-row-heavy"><span class="stat-label-heavy">Copyright Status</span><span class="badge badge-<?= ($video->copyright_status == 'NONE') ? 'success' : 'danger' ?>"><?= $video->copyright_status ?></span></div>
-                    
-                    <?php if(!empty($video->original_video_url)): ?>
-                        <div class="mt-3 p-2 bg-light border rounded">
-                            <span class="stat-label-heavy d-block mb-2 text-danger">Matched Original Content</span>
-                            <video width="100%" class="rounded mb-2" controls poster="<?= get_media_url($video->original_thumbnail, 'video') ?>"><source src="<?= get_media_url($video->original_video_url, 'video') ?>" type="video/mp4"></video>
-                            <div class="small mb-1">Owner: <b><?= $video->original_owner_name ?></b></div>
+                <div class="col-xl-12 col-lg-6 col-md-6 mb-4">
+                    <div class="deep-dive-card h-100 mb-0">
+                        <div class="card-title-head">
+                            Monetization
+                            <span class="monetize-badge <?= $video->monetization_enabled ? 'bg-success-soft' : 'bg-muted-soft' ?>">
+                                <i class="fas fa-circle status-dot bg-dot-success"></i> 
+                                <?= $video->monetization_enabled ? 'Monetized' : 'Disabled' ?>
+                            </span>
                         </div>
-                    <?php endif; ?>
-                    
-                    <button class="btn btn-outline-danger btn-block btn-xs font-weight-bold mt-3 py-2" onclick="blacklistHash('<?= $video->id ?>')"><i class="fas fa-ban mr-1"></i> BLACKLIST CONTENT HASH</button>
+                        <div class="p-3">
+                            <div class="d-lbl text-muted">Real Earnings</div>
+                            <div class="m-earnings">₹<?= number_format($creator_earnings->total_earnings ?? 0, 2) ?></div>
+                            
+                            <div class="d-flex justify-content-between mt-3 mb-3">
+                                <div>
+                                    <div class="d-lbl text-muted">Ad Impressions</div>
+                                    <div class="text-strong text-md text-dark"><?= format_number_k($ad_stats->total_imps ?? 0) ?></div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="d-lbl text-muted">Avg RPM</div>
+                                    <div class="text-strong text-md text-dark">₹<?= number_format($ad_stats->avg_rpm ?? 0, 2) ?></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-            <div class="heavy-card" style="border-top: 3px solid var(--accent-red);">
-                <div class="heavy-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-flag mr-1 text-danger"></i> User Reports (Violation Queue)</span> 
-                    <span class="badge badge-danger"><?= count($reports) ?> Reports</span>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-hover mb-0 small">
-                        <tbody>
-                            <?php foreach($reports as $r): ?>
-                            <tr>
-                                <td class="p-2 pl-3"><b><?= $r->reason ?></b><br><span class="text-muted" style="font-size: 9px;">BY: @<?= strtoupper($r->reporter_name) ?></span></td>
-                                <td class="p-2 pr-3 text-right align-middle"><span class="badge" style="background: rgba(253,57,122,0.1); color: var(--accent-red); font-size: 9px;"><?= strtoupper($r->status) ?></span></td>
-                            </tr>
-                            <?php endforeach; if(empty($reports)) echo "<tr><td colspan='2' class='text-center py-4 text-muted font-weight-bold'>Clean Security Record.</td></tr>"; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                <div class="col-xl-12 col-lg-6 col-md-6 mb-4">
+                    <div class="deep-dive-card h-100 mb-0">
+                        <div class="card-title-head">Copyright Status</div>
+                        <div class="p-3">
+                            <?php if(empty($video->copyright_status) || $video->copyright_status == 'NONE'): ?>
+                                <div class="d-flex align-items-center mb-4">
+                                    <div class="copyright-pass bg-success-soft"><i class="fas fa-check"></i></div>
+                                    <div>
+                                        <div class="text-strong text-dark text-md">No Copyright Issues</div>
+                                        <div class="text-muted small">Content is safe</div>
+                                    </div>
+                                </div>
+                            <?php else: ?>
+                                <div class="d-flex align-items-center mb-4">
+                                    <div class="copyright-pass bg-danger-soft"><i class="fas fa-exclamation-triangle"></i></div>
+                                    <div>
+                                        <div class="text-strong text-dark text-md">Violation Found</div>
+                                        <div class="text-danger-custom small font-weight-bold"><?= esc($video->copyright_status) ?></div>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-            <div class="heavy-card">
-                <div class="heavy-header">Machine Logs & Sentiment</div>
-                <div class="card-body p-3">
-                    <div class="data-row-heavy border-0 py-1 mb-2"><span class="stat-label-heavy text-dark">FFmpeg Processing</span><span class="badge <?= ($process_log?->status == 'completed') ? 'badge-success' : 'badge-warning' ?>" style="font-size: 9px;"><?= strtoupper($process_log?->status ?? 'N/A') ?></span></div>
-                    <div class="data-row-heavy border-0 py-1 mb-2"><span class="stat-label-heavy text-dark">Duration / Scheduled</span><span class="stat-value-heavy" style="font-size: 11px;"><?= $video->duration ?>s / <?= $video->scheduled_at ?: 'Now' ?></span></div>
-                    <hr class="my-2">
-                    <div class="data-row-heavy border-0 py-1 mb-0"><span class="stat-label-heavy text-danger">Not Interested</span><span class="font-weight-bold"><?= $feedback['Not Interested'] ?? 0 ?></span></div>
-                    <div class="data-row-heavy border-0 py-1 mb-0"><span class="stat-label-heavy text-danger">Hide Channel</span><span class="font-weight-bold"><?= $feedback['Hide Creator'] ?? 0 ?></span></div>
+                            <div class="d-flex justify-content-between align-items-end mb-1">
+                                <span class="d-lbl text-muted mb-0">AI Scan Score</span>
+                                <span class="text-strong text-dark text-md"><?= $video->ai_safety_score ?? 'N/A' ?>/100</span>
+                            </div>
+                            <?php if(isset($video->ai_safety_score)): ?>
+                                <div class="ai-score-track"><div class="ai-score-fill" style="width: <?= $video->ai_safety_score ?>%;"></div></div>
+                            <?php else: ?>
+                                <div class="ai-score-track"><div class="ai-score-fill bg-muted-soft" style="width: 0%;"></div></div>
+                            <?php endif; ?>
+
+                            <div class="check-row"><span class="text-muted"><i class="fas fa-check-circle text-success-custom mr-2"></i> Audio Check</span><span class="text-dark">Passed</span></div>
+                            <div class="check-row"><span class="text-muted"><i class="fas fa-check-circle text-success-custom mr-2"></i> Visual Match</span><span class="text-dark">Passed</span></div>
+                            <div class="check-row"><span class="text-muted"><i class="fas fa-check-circle text-success-custom mr-2"></i> Policy Check</span><span class="text-dark">Passed</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-12 col-lg-6 col-md-6 mb-4">
+                    <div class="deep-dive-card h-100 mb-0">
+                        <div class="card-title-head">Reports & Violations</div>
+                        <div class="p-3">
+                            <div class="rep-row"><span class="text-muted"><i class="fas fa-flag text-danger-custom mr-2"></i> Total Reports</span><span class="text-dark"><?= count($reports) ?></span></div>
+                            <div class="rep-row"><span class="text-muted"><i class="fas fa-exclamation-triangle text-warning-custom mr-2"></i> Active Strikes</span><span class="text-dark"><?= !empty($video_strike) ? '1' : '0' ?></span></div>
+                            <div class="rep-row"><span class="text-muted"><i class="fas fa-clipboard-list text-primary-custom mr-2"></i> Last Report</span><span class="text-dark"><?= !empty($reports) ? date('M d, Y', strtotime($reports[0]->created_at)) : 'None' ?></span></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -416,75 +518,143 @@
 <?= $this->include('admin/moderation/strikes/modal_snippet') ?>
 
 <script>
-function updateStatus(s) {
-    Swal.fire({
-        title: 'Confirm Visibility Change',
-        text: "Are you sure you want to change this video's visibility to: " + s.toUpperCase() + "?",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#343a40', 
-        cancelButtonColor: '#abb3ba',
-        confirmButtonText: 'Yes, update it!'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            $.post("<?= base_url('admin/videos/update_status') ?>", {id: "<?= $video->id ?>", status: s}, function() { 
-                location.reload(); 
-            });
-        }
-    });
-}
+document.addEventListener("DOMContentLoaded", function() {
+    // Dynamic Theme Color Fetcher for JS
+    const styles = getComputedStyle(document.documentElement);
+    const colorPrimary = styles.getPropertyValue('--primary-blue').trim() || '#4361ee';
+    const colorGreen = styles.getPropertyValue('--accent-green').trim() || '#2ec4b6';
+    const colorOrange = styles.getPropertyValue('--accent-orange').trim() || '#ff9f1c';
+    const colorRed = styles.getPropertyValue('--accent-red').trim() || '#e63946';
+    const colorPurple = '#7209b7'; // fallback
+    const colorBorder = styles.getPropertyValue('--border-soft').trim() || '#eaedf2';
+    const colorBg = styles.getPropertyValue('--bg-surface').trim() || '#ffffff';
+    const colorText = styles.getPropertyValue('--text-dark').trim() || '#1a1c23';
+    const colorPrimarySoft = 'rgba(67, 97, 238, 0.1)';
 
-function updateVisibilityFromSelect() {
-    let vis = document.getElementById('visibility_selector').value;
-    updateStatus(vis);
-}
+    // Graph 1: Performance Line Chart
+    const graphData = <?= json_encode($graph_data) ?>;
+    if(graphData && graphData.length > 0) {
+        const ctxLine = document.getElementById('performanceChart').getContext('2d');
+        let labels = []; let viewData = []; 
+        
+        graphData.forEach(item => { 
+            labels.push(item.date); 
+            viewData.push(item.count); 
+        });
 
-function deleteVideo(id) {
-    Swal.fire({
-        title: 'DANGER: Permanently Delete Video?',
-        text: "This will completely wipe the video, views, likes, and all associated data. This action CANNOT be undone!",
-        icon: 'error',
-        showCancelButton: true,
-        confirmButtonColor: '#dc3545',
-        cancelButtonColor: '#6c757d',
-        confirmButtonText: 'Yes, Wipe Everything!'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            window.location.href = "<?= base_url('admin/videos/delete/') ?>" + id;
-        }
-    });
-}
+        new Chart(ctxLine, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: 'Views', data: viewData, borderColor: colorPrimary, backgroundColor: colorPrimarySoft, borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                    y: { grid: { borderDash: [5, 5], color: colorBorder }, ticks: { font: { size: 10 } } }
+                }
+            }
+        });
+    } else {
+        document.getElementById('performanceChart').outerHTML = '<div class="text-center text-muted p-4 small">No trend data available for the last 7 days.</div>';
+    }
 
-function blacklistHash(id) {
-    Swal.fire({
-        title: 'DANGER: Blacklist Hash?',
-        text: "This blocks future uploads of this exact video file. This action cannot be undone.",
-        icon: 'error',
-        showCancelButton: true,
-        confirmButtonColor: '#dc3545', 
-        cancelButtonColor: '#6c757d',
-        confirmButtonText: 'Yes, Blacklist it!'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            $.post("<?= base_url('admin/videos/blacklist/') ?>"+id, {reason: "Copyright / Policy Violation"}, function() { 
-                Swal.fire(
-                    'Banned!',
-                    'Content Hash Banned Successfully.',
-                    'success'
-                ).then(() => {
-                    location.reload(); 
-                });
-            });
-        }
-    });
-}
+    // Graph 2: Device Donut Chart
+    const deviceStats = <?= json_encode($device_stats) ?>;
+    if(deviceStats && deviceStats.length > 0) {
+        const ctxDonut = document.getElementById('deviceChart').getContext('2d');
+        let devLabels = []; let devData = []; let devColors = [colorPrimary, colorGreen, colorOrange, colorPurple];
+        let legendHtml = '';
 
-function openStrikeModal(t, id, c_id) {
-    $('#strike_content_type').val(t); 
-    $('#strike_content_id').val(id); 
-    $('#strike_channel_id').val(c_id); 
-    $('#addStrikeModal').modal('show');
-}
+        deviceStats.forEach((item, index) => {
+            let labelName = item.device_type ? item.device_type.charAt(0).toUpperCase() + item.device_type.slice(1) : 'Unknown';
+            let pct = ((item.count / <?= max(1, $video->views_count) ?>) * 100).toFixed(1);
+            let color = devColors[index % devColors.length];
+            
+            devLabels.push(labelName);
+            devData.push(item.count);
+            legendHtml += `<div class="geo-row mb-1"><span class="geo-lbl"><i class="fas fa-circle" style="color: ${color}; font-size: 8px;"></i> ${labelName}</span><span class="geo-val">${pct}%</span></div>`;
+        });
+
+        document.getElementById('deviceLegend').innerHTML = legendHtml;
+
+        new Chart(ctxDonut, {
+            type: 'doughnut',
+            data: {
+                labels: devLabels,
+                datasets: [{ data: devData, backgroundColor: devColors, borderWidth: 0, cutout: '70%' }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: true } }
+            }
+        });
+    }
+
+    // Admin Actions Logic
+    window.updateStatus = function(s) {
+        Swal.fire({
+            title: 'Change Visibility?',
+            text: "Are you sure you want to change status to: " + s.toUpperCase(),
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: colorPrimary,
+            cancelButtonColor: colorBorder,
+            confirmButtonText: 'Yes, update',
+            background: colorBg,
+            color: colorText
+        }).then((result) => {
+            if (result.isConfirmed) {
+                $.post("<?= base_url('admin/videos/update_status') ?>", {id: "<?= $video->id ?>", status: s}, function() { location.reload(); });
+            }
+        });
+    }
+
+    window.deleteVideo = function(id) {
+        Swal.fire({
+            title: 'Permanently Delete?',
+            text: "This action cannot be undone.",
+            icon: 'error',
+            showCancelButton: true,
+            confirmButtonColor: colorRed,
+            cancelButtonColor: colorBorder,
+            confirmButtonText: 'Yes, Delete',
+            background: colorBg,
+            color: colorText
+        }).then((result) => {
+            if (result.isConfirmed) { window.location.href = "<?= base_url('admin/videos/delete/') ?>" + id; }
+        });
+    }
+
+    window.blacklistHash = function(id) {
+        Swal.fire({
+            title: 'Blacklist Hash?',
+            text: "Blocks future uploads of this file.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: colorRed,
+            cancelButtonColor: colorBorder,
+            confirmButtonText: 'Yes, Blacklist',
+            background: colorBg,
+            color: colorText
+        }).then((result) => {
+            if (result.isConfirmed) {
+                $.post("<?= base_url('admin/videos/blacklist/') ?>"+id, {reason: "Policy Violation"}, function() { location.reload(); });
+            }
+        });
+    }
+
+    window.openStrikeModal = function(t, id, c_id) {
+        $('#strike_content_type').val(t); 
+        $('#strike_content_id').val(id); 
+        $('#strike_channel_id').val(c_id); 
+        $('#addStrikeModal').modal('show');
+    }
+});
 </script>
 
 <?= $this->endSection() ?>

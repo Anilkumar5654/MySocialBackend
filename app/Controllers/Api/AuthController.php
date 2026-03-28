@@ -4,6 +4,7 @@ use App\Controllers\BaseController;
 use App\Models\UserModel;
 use App\Models\ChannelModel;
 use CodeIgniter\API\ResponseTrait;
+use App\Helpers\StreamHelper; // 🔥 Added StreamHelper
 
 class AuthController extends BaseController {
     use ResponseTrait;
@@ -59,8 +60,9 @@ class AuthController extends BaseController {
         try {
             $this->userModel->update($currentUserId, ['fcm_token' => $fcmToken]);
             
-            $streamToken = $this->getStreamToken((string)$currentUserId);
-            $apiKey = "hd2hh25znvez";
+            // 🔥 UPDATED: Using StreamHelper for stable token
+            $streamToken = StreamHelper::generateToken((string)$currentUserId);
+            $apiKey = StreamHelper::getApiKey();
             $apiUrl = "https://chat.stream-io-api.com/devices?api_key=" . $apiKey;
 
             $deviceData = [
@@ -99,30 +101,10 @@ class AuthController extends BaseController {
     }
 
     /**
-     * 🔥 FIXED: getStreamToken (Chat Only + Clock Buffer)
+     * 🔥 UPDATED: getStreamToken now routes through StreamHelper
      */
     private function getStreamToken(string $userId) {
-        try {
-            $apiKey = "hd2hh25znvez";
-            $apiSecret = "55863qe5x7p5zzam7qa4guqctcug2ny7rnzhk6kg4cdqr2uqcw35mwaxye22wnb8";
-
-            $header = json_encode(['alg' => 'HS256', 'typ' => 'JWT']);
-            $payload = json_encode([
-                'user_id' => (string)$userId,
-                'iat' => time() - 60,          // ✅ Server Time drift fix
-                'exp' => time() + (3600 * 24)  // ✅ 24h Expiry
-            ]);
-
-            $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-            $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-            $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, $apiSecret, true);
-            $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-
-            $token = $base64UrlHeader . "." . $base64UrlPayload . "." . $base64UrlSignature;
-            return preg_replace('/\s+/', '', trim($token)); 
-        } catch (\Exception $e) {
-            return null;
-        }
+        return StreamHelper::generateToken($userId);
     }
 
     public function checkUsername() {
@@ -177,15 +159,24 @@ class AuthController extends BaseController {
         return $email->send();
     }
 
-    private function generateAndSaveToken(int $userId): string {
+    /**
+     * ✨ UPGRADE: generateAndSaveToken now accepts device & location data
+     */
+    private function generateAndSaveToken(int $userId, array $deviceData = []): string {
         $token = bin2hex(random_bytes(32));
         $insertData = [
-            'user_id' => $userId,
-            'token' => $token,
-            'expires_at' => date('Y-m-d H:i:s', strtotime('+1 year')),
-            'created_at' => date('Y-m-d H:i:s'),
-            'ip_address' => $this->request->getIPAddress(),
-            'device_info' => substr((string)$this->request->getUserAgent(), 0, 255)
+            'user_id'        => $userId,
+            'token'          => $token,
+            'expires_at'     => date('Y-m-d H:i:s', strtotime('+1 year')),
+            'created_at'     => date('Y-m-d H:i:s'),
+            'ip_address'     => $this->request->getIPAddress(),
+            'device_info'    => substr((string)$this->request->getUserAgent(), 0, 255),
+            'device_type'    => $deviceData['device_type'] ?? null,
+            'os_name'        => $deviceData['os_name'] ?? null,
+            'device_model'   => $deviceData['device_model'] ?? null,
+            'location_city'  => $deviceData['location_city'] ?? null,
+            'location_state' => $deviceData['location_state'] ?? null,
+            'is_active'      => 1
         ];
         $this->db->table('auth_tokens')->insert($insertData);
         return $token;
@@ -247,13 +238,28 @@ class AuthController extends BaseController {
             return $this->respond(['status' => 401, 'error' => 'ACCOUNT_UNVERIFIED', 'message' => 'Please verify your email.'], 401);
         }
 
-        $updateData = ['last_active' => date('Y-m-d H:i:s')];
+        // ✨ UPGRADE: Kill old active sessions before new login (Single Device Policy)
+        $this->db->table('auth_tokens')
+            ->where('user_id', $user['id'])
+            ->where('is_active', 1)
+            ->update(['is_active' => 0, 'logged_out_at' => date('Y-m-d H:i:s')]);
+
+        $updateData = ['last_active' => date('Y-m-d H:i:s'), 'last_active_ip' => $this->request->getIPAddress()];
         if ($fcmToken) {
             $updateData['fcm_token'] = $fcmToken;
         }
         $this->userModel->update($user['id'], $updateData);
 
-        $token = $this->generateAndSaveToken((int)$user['id']);
+        // Capture device info from request body
+        $deviceData = [
+            'device_type'    => $input['device_type'] ?? null,
+            'os_name'        => $input['os_name'] ?? null,
+            'device_model'   => $input['device_model'] ?? null,
+            'location_city'  => $input['location_city'] ?? null,
+            'location_state' => $input['location_state'] ?? null
+        ];
+
+        $token = $this->generateAndSaveToken((int)$user['id'], $deviceData);
         $streamToken = $this->getStreamToken((string)$user['id']);
 
         return $this->respond([
@@ -280,7 +286,7 @@ class AuthController extends BaseController {
     }
 
     /**
-     * ✅ REGISTER WITH SMART ID SYSTEM
+     * ✅ REGISTER WITH SMART ID SYSTEM + DOB & GENDER
      */
     public function register() {
         $input = $this->getRequestInput();
@@ -311,6 +317,8 @@ class AuthController extends BaseController {
             'username' => $username,
             'email' => $email,
             'password' => password_hash($input['password'], PASSWORD_DEFAULT),
+            'dob' => $input['dob'] ?? null,            // 👈 NEW: Date of Birth added
+            'gender' => $input['gender'] ?? null,      // 👈 NEW: Gender added
             'verification_code' => $otp,
             'verification_code_expires_at' => date('Y-m-d H:i:s', strtotime('+1 hour')),
             'email_verified' => 0, 
@@ -360,9 +368,19 @@ class AuthController extends BaseController {
             return $this->respond(['status' => 400, 'message' => 'Invalid OTP'], 400);
         }
         $this->userModel->update($user['id'], ['verification_code' => null, 'email_verified' => 1]);
+
+        // Capture device info for session creation after OTP
+        $deviceData = [
+            'device_type'    => $input['device_type'] ?? null,
+            'os_name'        => $input['os_name'] ?? null,
+            'device_model'   => $input['device_model'] ?? null,
+            'location_city'  => $input['location_city'] ?? null,
+            'location_state' => $input['location_state'] ?? null
+        ];
+
         return $this->respond([
             'status' => 200,
-            'token' => $this->generateAndSaveToken((int)$user['id']),
+            'token' => $this->generateAndSaveToken((int)$user['id'], $deviceData),
             'stream_token' => $this->getStreamToken((string)$user['id']),
             'user' => $this->getFullProfileData((int)$user['id']),
             'message' => 'Verified'
@@ -397,11 +415,32 @@ class AuthController extends BaseController {
         ]);
     }
 
+    /**
+     * ✨ UPGRADE: Logout now marks session as inactive and sets logout time correctly
+     */
     public function logout() {
         $userId = $this->request->getHeaderLine('User-ID');
+        $authHeader = $this->request->getHeaderLine('Authorization');
+        
+        // ✨ FIX: Extract token robustly
+        $token = null;
+        if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            $token = $matches[1];
+        }
+
         if ($userId) {
             $this->userModel->update($userId, ['fcm_token' => null]);
+            
+            // ✨ FIX: Mark the specific session as logged out in DB
+            if ($token) {
+                $this->db->table('auth_tokens')
+                    ->where(['user_id' => $userId, 'token' => $token])
+                    ->update([
+                        'logged_out_at' => date('Y-m-d H:i:s'),
+                        'is_active' => 0
+                    ]);
+            }
         }
-        return $this->respond(['status' => 200, 'message' => 'Logged out']);
+        return $this->respond(['status' => 200, 'message' => 'Logged out successfully']);
     }
 }

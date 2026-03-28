@@ -11,26 +11,13 @@ class ReelModel extends Model
     protected $useAutoIncrement = true;
     protected $returnType       = 'array';
     protected $useSoftDeletes   = false;
-    
     protected $protectFields    = true;
 
     protected $allowedFields    = [
-        'unique_id',      // ✅ Added for Smart ID
-        'user_id',
-        'channel_id',
-        'music_id',       
-        'video_url',
-        'thumbnail_url',
-        'caption',
-        'category',
-        'duration',       
-        'visibility',     
-        'status',         
-        'likes_count',
-        'comments_count',
-        'shares_count',
-        'views_count',
-        'viral_score'
+        'unique_id', 'original_content_id', 'user_id', 'channel_id', 'music_id',       
+        'video_url', 'thumbnail_url', 'video_hash', 'frame_hashes', 'caption',
+        'category', 'duration', 'visibility', 'status', 'scheduled_at',
+        'likes_count', 'comments_count', 'shares_count', 'views_count', 'viral_score'
     ];
 
     protected $useTimestamps = true;
@@ -38,12 +25,15 @@ class ReelModel extends Model
     protected $createdField  = 'created_at';
     protected $updatedField  = 'updated_at';
 
+    // ✅ FIX: 'required' ko 'permit_empty' kiya taaki partial updates (Worker) na rukein
     protected $validationRules = [
-        'unique_id'  => 'required|is_unique[reels.unique_id,id,{id}]', // ✅ Security Check
-        'user_id'    => 'required|integer',
-        'video_url'  => 'required', 
-        'duration'   => 'required|integer',
-        'status'     => 'in_list[draft,published,archived]'
+        'unique_id'  => 'permit_empty', 
+        'user_id'    => 'permit_empty|integer',
+        'video_url'  => 'permit_empty', 
+        'duration'   => 'permit_empty|integer',
+        'status'     => 'permit_empty|in_list[draft,published,archived,processing,failed,scheduled]' 
     ];
-}
 
+    protected $validationMessages = [];
+    protected $skipValidation     = false;
+}

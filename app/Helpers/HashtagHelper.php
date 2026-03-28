@@ -12,85 +12,113 @@ class HashtagHelper
     }
 
     /**
-     * 🔥 NEW: Seedhe Array (tags) ko handle karne ke liye
-     * Isse Controller ka error khatam ho jayega
+     * ✅ FINAL BULLETPROOF: Plain Tags Sync
+     * Casting to (int) and (string) to ensure DB compatibility
      */
-    public function sync($type, $contentId, $tagsArray)
+    public function syncPlainTags($contentId, $type, $tagsArray, $isVisible = 1)
     {
-        if (empty($tagsArray)) {
-            return $this->syncHashtags($contentId, $type, ""); 
-        }
-        
-        // Array ko text format mein convert karke syncHashtags ko bhej rahe hain
-        // Taaki aapka purana logic aur # waale tags ka system na bigde
-        $text = "";
-        foreach($tagsArray as $t) {
-            $t = trim($t, '# ');
-            if (!empty($t)) {
-                $text .= " #" . $t;
+        // 1. Consistency: Type ko hamesha lowercase enum format me rakho
+        $type = strtolower(trim($type));
+
+        // 2. Fresh Sync: Purane links delete karo
+        $this->db->table('taggables')->where([
+            'taggable_id'   => (int)$contentId,
+            'taggable_type' => (string)$type
+        ])->delete();
+
+        if (empty($tagsArray) || !is_array($tagsArray)) return true;
+
+        try {
+            foreach ($tagsArray as $tagName) {
+                // Safai: lowercase aur hashes hatao
+                $tagName = mb_strtolower(trim($tagName, '# ')); 
+                if (empty($tagName)) continue;
+
+                // 3. Insert Ignore in hashtags table
+                $this->db->query("INSERT IGNORE INTO hashtags (tag, posts_count) VALUES (?, 0)", [$tagName]);
+
+                // 4. Tag ki ID uthao
+                $row = $this->db->table('hashtags')->where('tag', $tagName)->get()->getRow();
+                
+                if ($row) {
+                    // 5. 🔥 STRICT CASTING: MySQL BIGINT aur ENUM ke liye safe approach
+                    $this->db->table('taggables')->insert([
+                        'hashtag_id'    => (int)$row->id,
+                        'taggable_id'   => (int)$contentId,
+                        'taggable_type' => (string)$type,
+                        'is_visible'    => (int)$isVisible
+                    ]);
+                }
             }
+            return true;
+        } catch (\Exception $e) {
+            log_message('error', '[Plain Tag Sync Error] ' . $e->getMessage());
+            return false;
         }
-        return $this->syncHashtags($contentId, $type, $text);
     }
 
     /**
-     * ✅ UNTOUCHED: Purana Regex Based Logic
+     * ✅ RE-ENGINEERED: Controller interface
+     */
+    public function sync($type, $contentId, $tagsArray)
+    {
+        $tags = is_array($tagsArray) ? $tagsArray : [];
+        return $this->syncPlainTags($contentId, $type, $tags);
+    }
+
+    /**
+     * ✅ UNTOUCHED: Purana Regex Based Logic (Reels Caption ke liye)
      */
     public function syncHashtags($contentId, $type, $text, $isVisible = 1)
     {
+        $type = strtolower(trim($type));
+
         if (empty($text)) {
-            // Agar text khali hai toh purane links delete
             $this->db->table('taggables')->where([
-                'taggable_id'   => $contentId,
-                'taggable_type' => $type
+                'taggable_id'   => (int)$contentId,
+                'taggable_type' => (string)$type
             ])->delete();
             return true;
         }
 
-        // 1. Extract hashtags (Regex) - Ye # waale tags dhoondhta hai
+        // Extract hashtags using Regex
         preg_match_all('/#(\w+)/u', $text, $matches);
         $tags = array_unique($matches[1]); 
 
         if (empty($tags)) {
             $this->db->table('taggables')->where([
-                'taggable_id'   => $contentId,
-                'taggable_type' => $type
+                'taggable_id'   => (int)$contentId,
+                'taggable_type' => (string)$type
             ])->delete();
             return true;
         }
 
         try {
-            // 2. Purane links hatao
             $this->db->table('taggables')->where([
-                'taggable_id'   => $contentId,
-                'taggable_type' => $type
+                'taggable_id'   => (int)$contentId,
+                'taggable_type' => (string)$type
             ])->delete();
 
             foreach ($tags as $tagName) {
                 $tagName = mb_strtolower(trim($tagName));
                 if (empty($tagName)) continue;
 
-                // 3. 🔥 TRIGGER-FRIENDLY INSERT
                 $this->db->query("INSERT IGNORE INTO hashtags (tag, posts_count) VALUES (?, 0)", [$tagName]);
-
-                // 4. Tag ID fetch karo
                 $row = $this->db->table('hashtags')->where('tag', $tagName)->get()->getRow();
                 
                 if ($row) {
-                    // 5. Insert hote hi SQL TRIGGER count +1 kar dega
                     $this->db->table('taggables')->insert([
-                        'hashtag_id'    => $row->id,
-                        'taggable_id'   => $contentId,
-                        'taggable_type' => $type,
-                        'is_visible'    => $isVisible
+                        'hashtag_id'    => (int)$row->id,
+                        'taggable_id'   => (int)$contentId,
+                        'taggable_type' => (string)$type,
+                        'is_visible'    => (int)$isVisible
                     ]);
                 }
             }
             return true;
         } catch (\Exception $e) {
-            log_message('error', '[Hashtag Error] ' . $e->getMessage());
+            log_message('error', '[Hashtag Regex Error] ' . $e->getMessage());
             return false;
         }
     }
 }
-
