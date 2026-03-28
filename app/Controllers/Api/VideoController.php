@@ -478,6 +478,24 @@ class VideoController extends BaseController
 
         $isMonetized = ($this->request->getVar('monetization_enabled') === 'true' || $this->request->getVar('monetization_enabled') == 1) ? 1 : 0;
 
+        // 🔥 LOGIC FIX: Check if status is explicitly passed as 'scheduled'
+        $requestedStatus = $this->request->getVar('status');
+        $scheduledAtStr = $this->request->getVar('scheduled_at');
+        
+        // Default processing status logic
+        $finalStatus = $isFfmpegEnabled ? 'processing' : 'published';
+        
+        // If app requested 'scheduled', use that as the primary status
+        if ($requestedStatus === 'scheduled') {
+            $finalStatus = 'scheduled';
+        }
+
+        // 🔥 PERMANENT FIX: Convert incoming ISO String to proper UTC MySQL Datetime safely
+        $scheduledAtUTC = null;
+        if (!empty($scheduledAtStr)) {
+            $scheduledAtUTC = gmdate('Y-m-d H:i:s', strtotime($scheduledAtStr));
+        }
+
         $data = [
             'user_id' => $userId,
             'channel_id' => $channel['id'],
@@ -490,8 +508,9 @@ class VideoController extends BaseController
             'video_url' => $videoDbPath,
             'thumbnail_url' => ($thumbFile && $thumbFile->isValid()) ? upload_media_master($thumbFile, 'video_thumbnail') : null,
             'monetization_enabled' => $isMonetized,
-            'status' => $isFfmpegEnabled ? 'processing' : 'published',
-            'created_at' => date('Y-m-d H:i:s')
+            'status' => $finalStatus,
+            'scheduled_at' => $scheduledAtUTC, // 🔥 Safely saved in DB as UTC
+            'created_at' => gmdate('Y-m-d H:i:s') // Also ensuring created_at is strictly UTC
         ];
 
         if ($this->videoModel->insert($data)) {
@@ -504,8 +523,8 @@ class VideoController extends BaseController
                     'video_type' => 'video',
                     'input_path' => $videoDbPath,
                     'status'     => 'pending',
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s')
+                    'created_at' => gmdate('Y-m-d H:i:s'),
+                    'updated_at' => gmdate('Y-m-d H:i:s')
                 ]);
             }
 

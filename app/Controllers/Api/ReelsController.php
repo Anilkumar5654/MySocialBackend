@@ -443,6 +443,20 @@ class ReelsController extends BaseController
 
         $this->db->transStart();
 
+        // 🔥 LOGIC FIX: Safely capture 'scheduled' status and explicitly save in UTC format.
+        $requestedStatus = $this->request->getPost('status');
+        $scheduledAtStr = $this->request->getPost('scheduled_at');
+
+        $finalStatus = $needsProcessing ? 'processing' : 'published';
+        if ($requestedStatus === 'scheduled') {
+            $finalStatus = 'scheduled';
+        }
+
+        $scheduledAtUTC = null;
+        if (!empty($scheduledAtStr)) {
+            $scheduledAtUTC = gmdate('Y-m-d H:i:s', strtotime($scheduledAtStr));
+        }
+
         $data = [
             'user_id' => $currentUserId,
             'channel_id' => $channel->id,
@@ -451,11 +465,12 @@ class ReelsController extends BaseController
             'caption' => $this->request->getPost('caption') ?? '',
             'duration' => (int)($this->request->getPost('duration') ?? 0),
             'visibility' => $this->request->getPost('visibility') ?? 'public',
-            'media_type' => $mediaType, // 🔥 Saved for backend logic
-            'original_sound_muted' => $originalMuted, // 🔥 Mute flag
-            'is_separate_audio' => $isSeparateAudio, // 🔥 Copyright flag
-            'allow_download' => $allowDownload, // 🔥 Security flag
-            'status' => $needsProcessing ? 'processing' : 'published',
+            'media_type' => $mediaType, 
+            'original_sound_muted' => $originalMuted, 
+            'is_separate_audio' => $isSeparateAudio, 
+            'allow_download' => $allowDownload, 
+            'status' => $finalStatus, // 🔥 Safely populated
+            'scheduled_at' => $scheduledAtUTC, // 🔥 Safely saved in DB as UTC
             'created_at' => date('Y-m-d H:i:s')
         ];
 
@@ -475,7 +490,7 @@ class ReelsController extends BaseController
                 'channel_id' => $channel->id,
                 'video_type' => 'reel',
                 'input_path' => $mediaDbPath,
-                'media_type' => $mediaType, // Image needs video conversion
+                'media_type' => $mediaType, 
                 'original_sound_muted' => $originalMuted,
                 'music_id' => $musicId,
                 'status' => 'pending',

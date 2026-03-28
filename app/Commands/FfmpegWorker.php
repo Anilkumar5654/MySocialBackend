@@ -14,7 +14,6 @@ class FfmpegWorker extends BaseCommand
     protected $description = 'ULTIMATE Production-Ready Video Worker - Numbered Logic Version';
 
     // 🟢 [LOGIC 1] - DEBUGGER SYSTEM
-    // Purpose: Detailed logging for tracking failures in writable/logs/ffmpeg_debug.log
     private function logDebug($message) {
         $logFile = WRITEPATH . 'logs/ffmpeg_debug.log';
         $timestamp = date('Y-m-d H:i:s');
@@ -23,8 +22,15 @@ class FfmpegWorker extends BaseCommand
 
     public function run(array $params)
     {
+        // 🟢 [LOGIC 0] - OVERLAP PROTECTION (LOCK FILE)
+        $lockFilePath = WRITEPATH . 'ffmpeg_worker.lock';
+        $lockFile = fopen($lockFilePath, 'w+');
+        if (!flock($lockFile, LOCK_EX | LOCK_NB)) {
+            CLI::write("FFmpeg Worker is already running. Exiting safely.", 'yellow');
+            return;
+        }
+
         // 🟢 [LOGIC 2] - ENVIRONMENT STABILIZATION
-        // Purpose: Force path consistency and resource limits for long-running cron jobs
         chdir(ROOTPATH);
         set_time_limit(0); 
         ini_set('memory_limit', '1024M'); 
@@ -33,16 +39,15 @@ class FfmpegWorker extends BaseCommand
         helper(['media', 'filesystem', 'url', 'trust_score_helper', 'copyright_helper']);
 
         // 🟢 [LOGIC 3] - SYSTEM SWITCH CHECK
-        // Purpose: Check if FFmpeg is globally enabled in database settings
         $ffmpegEnabled = $db->table('system_settings')->where('setting_key', 'ffmpeg_enabled')->get()->getRow();
         if (!$ffmpegEnabled || $ffmpegEnabled->setting_value !== 'true') {
             CLI::write("FFmpeg is disabled in system settings.", 'red');
             $this->logDebug("CRITICAL: FFmpeg is disabled in system_settings table.");
+            flock($lockFile, LOCK_UN); // Release lock
             return;
         }
 
         // 🟢 [LOGIC 4] - SELF-HEALING ENGINE
-        // Purpose: Restart jobs stuck in 'processing' due to server crashes/timeouts
         $timeoutLimit = date('Y-m-d H:i:s', strtotime('-30 minutes'));
         $db->table('video_processing_queue')
            ->where('status', 'processing')
@@ -50,7 +55,6 @@ class FfmpegWorker extends BaseCommand
            ->update(['status' => 'pending', 'error_message' => 'Self-Healed: Connection Timeout']);
 
         // 🟢 [LOGIC 5] - PATH DISCOVERY
-        // Purpose: Detect FFmpeg binary location across different server OS environments
         $ffmpegPath = is_executable("/usr/bin/ffmpeg") ? "/usr/bin/ffmpeg" : trim(shell_exec("which ffmpeg"));
         if (empty($ffmpegPath)) $ffmpegPath = "/usr/bin/ffmpeg";
 
@@ -95,7 +99,6 @@ class FfmpegWorker extends BaseCommand
             }
 
             // 🟢 [LOGIC 6] - AUDIO & MUSIC HANDLER
-            // Purpose: Detect if music overlay is requested or if original sound must be muted
             $mediaType = $queueItem->media_type ?? 'video';
             $musicId = $queueItem->music_id ?? null;
             $muteOriginal = (int)($queueItem->original_sound_muted ?? 0);
@@ -118,7 +121,6 @@ class FfmpegWorker extends BaseCommand
             $outputPath = $tempDir . 'proc_' . time() . '_' . uniqid() . '.mp4';
 
             // 🟢 [LOGIC 7] - FFMPEG CORE ENGINE (STEP 1)
-            // Purpose: Handle Video encoding, Image-to-Video conversion, and Muting
             if ($mediaType === 'image') {
                 if ($audioSourcePath && file_exists($audioSourcePath)) {
                     $cmdVideo = "$ffmpegPath -y -loop 1 -t 15 -i " . escapeshellarg($inputPath) . " -i " . escapeshellarg($audioSourcePath) . " -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -vf \"scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2\" " . escapeshellarg($outputPath) . " 2>&1";
@@ -144,7 +146,6 @@ class FfmpegWorker extends BaseCommand
                 $totalSec = $this->getVideoDuration($outputPath);
 
                 // 🟢 [LOGIC 8] - COPYRIGHT SCAN ENGINE (STEP 2)
-                // Purpose: Frame extraction and matching against Blacklist frame hashes
                 $finalFrameHashes = ""; $isMatchedInBlacklist = false; $finalAction = 'NONE'; $originalVidId = null;
                 if ($queueItem->video_type !== 'story') { 
                     $frameHashesArray = [];
@@ -180,7 +181,6 @@ class FfmpegWorker extends BaseCommand
                 }
 
                 // 🟢 [LOGIC 9] - THUMBNAIL GENERATOR (STEP 3)
-                // Purpose: Automatic poster generation if thumbnail is missing
                 $finalThumb = null;
                 if ($thumbCol && empty($originalVideo->thumbnail_url)) {
                     $tmpThumb = $tempDir . 'thumb_' . $targetId . '_' . time() . '.jpg';
@@ -189,7 +189,6 @@ class FfmpegWorker extends BaseCommand
                 }
 
                 // 🟢 [LOGIC 10] - FINALIZATION & PUBLISHING (STEP 4)
-                // Purpose: Update database records and notify subscribers. Includes safety column checks.
                 $this->ensureDbConnection($db);
                 $finalVideoUrl = upload_media_master($outputPath, $vidConfigKey);
 
@@ -198,23 +197,23 @@ class FfmpegWorker extends BaseCommand
                     $dbFields = $db->getFieldNames($dbTable);
                     $finalMediaType = ($mediaType === 'image' && !empty($musicId)) ? 'video' : $mediaType;
 
+                    $finalStatus = (isset($originalVideo->status) && $originalVideo->status === 'scheduled') ? 'scheduled' : 'published';
+
                     $updateData = [
                         $urlCol      => $finalVideoUrl,
-                        'status'     => 'published', 
+                        'status'     => $finalStatus, 
                         'duration'   => $totalSec,
-                        'updated_at' => date('Y-m-d H:i:s')
+                        'updated_at' => gmdate('Y-m-d H:i:s')
                     ];
 
                     if ($queueItem->video_type === 'story' && in_array('expires_at', $dbFields)) {
                         $updateData['expires_at'] = $originalVideo->expires_at; 
                     }
                     
-                    // 🛡️ [SAFETY] - Skip media_type for Videos table (column missing)
                     if ($queueItem->video_type === 'video' && !in_array('media_type', $dbFields)) {
                         unset($updateData['media_type']);
                     }
 
-                    // 🛡️ [SAFETY] - Skip updated_at for Stories table if column missing
                     if ($queueItem->video_type === 'story' && !in_array('updated_at', $dbFields)) {
                         unset($updateData['updated_at']);
                     }
@@ -230,12 +229,17 @@ class FfmpegWorker extends BaseCommand
                     $db->transBegin();
                     try {
                         $db->table($dbTable)->where('id', $targetId)->update($updateData);
-                        $db->table('video_processing_queue')->where('id', (int)$queueItem->id)->update(['status' => 'completed']);
+                        
+                        $db->table('video_processing_queue')->where('id', (int)$queueItem->id)->update([
+                            'status' => 'completed',
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+                        
                         $db->transCommit();
-                        $this->logDebug("PUBLISHED SUCCESS: Table=$dbTable | ID=$targetId");
-                        CLI::write("✅ ATTEMPT FINISHED: ID $targetId", 'green');
+                        $this->logDebug("PUBLISHED SUCCESS: Table=$dbTable | ID=$targetId | Status=$finalStatus");
+                        CLI::write("✅ ATTEMPT FINISHED: ID $targetId (Status: $finalStatus)", 'green');
 
-                        if ($queueItem->video_type === 'video') {
+                        if ($queueItem->video_type === 'video' && $finalStatus === 'published') {
                             $notifier = new NotificationHelper();
                             $notifier->notifySubscribersOnUpload($originalVideo->user_id, $targetId, 'video', $originalVideo->title, ['thumbnail' => $finalThumb]);
                         }
@@ -249,6 +253,9 @@ class FfmpegWorker extends BaseCommand
                 $db->table('video_processing_queue')->where('id', $queueItem->id)->update(['status' => 'failed', 'error_message' => 'FFmpeg Error']);
             }
         } 
+        
+        // Ensure lock is released at the end
+        flock($lockFile, LOCK_UN);
     }
 
     private function ensureDbConnection($db) {

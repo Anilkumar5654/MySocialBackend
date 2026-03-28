@@ -33,7 +33,6 @@ class ContentController extends BaseController
         $limit  = (int)($this->request->getGet('limit') ?? 10);
         $offset = ($page - 1) * $limit;
 
-        // 🔥 UPDATED: Added likes_count and comments_count from your DB structure
         $videoFields = "v.id, v.title AS title, v.views_count AS views, v.status, v.visibility, v.scheduled_at, v.thumbnail_url AS thumbnail, v.video_url, v.duration, v.monetization_enabled, v.copyright_status, v.created_at, v.likes_count, v.comments_count, 'video' AS content_type";
         $reelFields  = "r.id, r.caption AS title, r.views_count AS views, r.status, r.visibility, r.scheduled_at, r.thumbnail_url AS thumbnail, r.video_url, r.duration, r.monetization_enabled, r.copyright_status, r.created_at, r.likes_count, r.comments_count, 'reel' AS content_type"; 
 
@@ -55,7 +54,6 @@ class ContentController extends BaseController
             } else {
                 $table = ($type === 'reel') ? 'reels' : 'videos';
                 $fields = ($type === 'reel') ? $reelFields : $videoFields;
-                // Syncing table alias for single queries
                 $fields = str_replace(['v.', 'r.'], 't.', $fields);
                 
                 $builder = $this->db->table($table . ' AS t')->select($fields)->where('t.user_id', $userId);
@@ -72,6 +70,14 @@ class ContentController extends BaseController
                 $item['comments_count'] = (int)($item['comments_count'] ?? 0);
                 $item['monetization_enabled'] = (int)($item['monetization_enabled'] ?? 0); 
                 $item['strikes'] = $this->getContentStrikes($item['id'], strtoupper($item['content_type']));
+
+                // 🔥 PERMANENT FIX: Send time back as explicit UTC ISO string
+                if (!empty($item['scheduled_at'])) {
+                    $item['scheduled_at'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($item['scheduled_at'] . ' UTC'));
+                }
+                if (!empty($item['created_at'])) {
+                    $item['created_at'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($item['created_at'] . ' UTC'));
+                }
             }
 
             return $this->respond([
@@ -102,7 +108,6 @@ class ContentController extends BaseController
         
         if (!$content) return $this->failNotFound();
 
-        // Sync tags with lowercase type for consistency
         $tagsData = $this->db->table('taggables t')
             ->select('h.tag')
             ->join('hashtags h', 'h.id = t.hashtag_id')
@@ -114,11 +119,19 @@ class ContentController extends BaseController
         $content['video_url'] = get_media_url($content['video_url'] ?? '');
         $content['strikes'] = $this->getContentStrikes($id, strtoupper($type));
 
+        // 🔥 PERMANENT FIX: Send time back as explicit UTC ISO string
+        if (!empty($content['scheduled_at'])) {
+            $content['scheduled_at'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($content['scheduled_at'] . ' UTC'));
+        }
+        if (!empty($content['created_at'])) {
+            $content['created_at'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($content['created_at'] . ' UTC'));
+        }
+
         return $this->respond(['success' => true, 'meta' => $content]);
     }
 
     /**
-     * ✅ 3. BULLETPROOF UPDATE (With Auto-Comma Logic)
+     * ✅ 3. BULLETPROOF UPDATE (With Auto-Comma Logic & UTC Fix)
      */
     public function update($idFromUrl = null)
     {
@@ -141,6 +154,12 @@ class ContentController extends BaseController
             if ($val !== null) $updateData[$f] = $val;
         }
 
+        // 🔥 PERMANENT FIX: Convert incoming ISO String to proper UTC MySQL Datetime safely
+        $scheduledAt = $this->request->getVar('scheduled_at');
+        if ($scheduledAt !== null) {
+            $updateData['scheduled_at'] = !empty($scheduledAt) ? gmdate('Y-m-d H:i:s', strtotime($scheduledAt)) : null;
+        }
+
         if ($type === 'video') {
             $updateData['title'] = $this->request->getVar('title');
             $updateData['description'] = $this->request->getVar('description');
@@ -148,7 +167,6 @@ class ContentController extends BaseController
             $updateData['caption'] = $this->request->getVar('caption');
         }
 
-        // Thumbnail Processing
         $file = $this->request->getFile('thumbnail');
         if ($file && $file->isValid() && !$file->hasMoved()) {
             if (!empty($exists->thumbnail_url)) delete_media_master($exists->thumbnail_url);
